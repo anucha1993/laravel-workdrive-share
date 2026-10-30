@@ -41,7 +41,7 @@ class ZohoLoginTest extends TestCase
     {
         $this->fakeZoho('Staff@TheFirstGoodManGroup.com');
 
-        $this->withSession(['zoho_oauth_state' => 'st'])
+        $this->withSession(['zoho_oauth_states' => ['st']])
             ->get('/auth/zoho/callback?code=c&state=st')
             ->assertRedirect(route('workdrive.index'));
 
@@ -52,18 +52,39 @@ class ZohoLoginTest extends TestCase
     {
         $this->fakeZoho('someone@gmail.com');
 
-        $this->withSession(['zoho_oauth_state' => 'st'])
+        $this->withSession(['zoho_oauth_states' => ['st']])
             ->get('/auth/zoho/callback?code=c&state=st')
             ->assertForbidden();
 
         $this->assertGuest();
     }
 
-    public function test_wrong_state_is_rejected(): void
+    public function test_wrong_state_is_rejected_with_retry_link(): void
     {
-        $this->withSession(['zoho_oauth_state' => 'st'])
+        $this->withSession(['zoho_oauth_states' => ['st']])
             ->get('/auth/zoho/callback?code=c&state=other')
-            ->assertForbidden();
+            ->assertForbidden()
+            ->assertSee(route('auth.zoho'), false);
+
+        $this->assertGuest();
+    }
+
+    public function test_login_started_in_two_tabs_accepts_the_older_state(): void
+    {
+        $this->fakeZoho('staff@thefirstgoodmangroup.com');
+
+        $this->withSession(['zoho_oauth_states' => ['tab1', 'tab2']])
+            ->get('/auth/zoho/callback?code=c&state=tab1')
+            ->assertRedirect(route('workdrive.index'));
+
+        $this->assertAuthenticated();
+    }
+
+    public function test_refreshing_callback_after_login_goes_home(): void
+    {
+        $this->actingAs(User::factory()->create())
+            ->get('/auth/zoho/callback?code=used&state=used')
+            ->assertRedirect(route('workdrive.index'));
     }
 
     public function test_inside_iframe_shows_open_in_new_tab(): void

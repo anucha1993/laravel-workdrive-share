@@ -25,8 +25,14 @@ class ZohoAuthController extends Controller
 
     public function redirect(Request $request)
     {
+        if (Auth::check()) {
+            return redirect()->intended(route('workdrive.index'));
+        }
+
+        // จำไว้หลายค่า เผื่อผู้ใช้เปิด /auth/zoho หลายแท็บพร้อมกัน
         $state = Str::random(40);
-        $request->session()->put('zoho_oauth_state', $state);
+        $states = array_slice((array) $request->session()->get('zoho_oauth_states', []), -4);
+        $request->session()->put('zoho_oauth_states', [...$states, $state]);
 
         return redirect()->away($this->accounts() . '/oauth/v2/auth?' . http_build_query([
             'scope' => 'openid email profile',
@@ -40,11 +46,19 @@ class ZohoAuthController extends Controller
 
     public function callback(Request $request)
     {
-        abort_unless(
-            $request->filled('state') && hash_equals((string) $request->session()->pull('zoho_oauth_state'), $request->query('state')),
-            403,
-            'state ไม่ถูกต้อง กรุณาลองใหม่'
-        );
+        // กดย้อนกลับ/รีเฟรชหน้านี้หลัง Login สำเร็จแล้ว
+        if (Auth::check()) {
+            return redirect()->route('workdrive.index');
+        }
+
+        $states = (array) $request->session()->get('zoho_oauth_states', []);
+        $given = (string) $request->query('state');
+        $match = array_filter($states, fn ($s) => hash_equals((string) $s, $given));
+        if ($given === '' || !$match) {
+            // code/state ใช้ได้ครั้งเดียว — ให้เริ่มใหม่แทนการขึ้น 403 เฉยๆ
+            return response()->view('workdrive.login-retry', [], 403);
+        }
+        $request->session()->put('zoho_oauth_states', array_values(array_diff($states, $match)));
 
         if ($request->filled('error')) {
             return redirect('/')->with('error', 'Zoho ปฏิเสธการเข้าสู่ระบบ: ' . $request->query('error'));
