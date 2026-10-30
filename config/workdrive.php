@@ -9,6 +9,9 @@ return [
     'client_secret' => env('WORKDRIVE_CLIENT_SECRET'),
     'refresh_token' => env('WORKDRIVE_REFRESH_TOKEN'),
 
+    // โฟลเดอร์ที่มีโฟลเดอร์บริษัทอยู่ข้างใน (Zoho CRM - Workdrive / Accounts) — ใช้อ่านรายชื่อบริษัทเท่านั้น ไม่เขียนอะไรลงไป
+    'company_root_id' => env('WORKDRIVE_COMPANY_ROOT_ID'),
+
     // role_id ของสิทธิ์ "ดูอย่างเดียว" ตามเอกสาร POST /permissions
     // ไฟล์: 34 = View | โฟลเดอร์: 6 = View
     'file_view_role_id' => env('WORKDRIVE_FILE_VIEW_ROLE_ID', '34'),

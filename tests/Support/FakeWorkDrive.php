@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Http;
  */
 class FakeWorkDrive
 {
-    /** @var array<string, array{id:string,name:string,folder:bool,status:int}> */
+    /** @var array<string, array{id:string,name:string,folder:bool,status:int,parent:?string}> */
     public array $items = [];
 
     /** สิทธิ์ที่มีอยู่ใน WorkDrive: permission_id => [resource_id, email, role_id, notify] */
@@ -30,15 +30,15 @@ class FakeWorkDrive
         return str_pad($prefix, 25, '0');
     }
 
-    public function addFolder(string $id, string $name): string
+    public function addFolder(string $id, string $name, ?string $parent = null): string
     {
-        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => true, 'status' => 1];
+        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => true, 'status' => 1, 'parent' => $parent];
         return $id;
     }
 
-    public function addFile(string $id, string $name): string
+    public function addFile(string $id, string $name, ?string $parent = null): string
     {
-        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => false, 'status' => 1];
+        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => false, 'status' => 1, 'parent' => $parent];
         return $id;
     }
 
@@ -67,6 +67,16 @@ class FakeWorkDrive
             $body = $request->data();
             $this->requests[] = ['method' => $method, 'path' => $path, 'body' => $body];
 
+            // GET /files/{id}/files — รายการในโฟลเดอร์ (แบ่งหน้าละ 50)
+            if ($method === 'GET' && preg_match('#^/files/(\w+)/files$#', $path, $m)) {
+                parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $q);
+                $kids = array_values(array_filter($this->items, fn ($i) => $i['parent'] === $m[1] && $i['status'] === 1));
+                $page = array_slice($kids, (int) ($q['page']['offset'] ?? 0), (int) ($q['page']['limit'] ?? 50));
+                return Http::response(['data' => array_map(fn ($i) => ['id' => $i['id'], 'type' => 'files', 'attributes' => [
+                    'name' => $i['name'], 'is_folder' => $i['folder'], 'type' => $i['folder'] ? 'folder' : 'pdf',
+                ]], $page)]);
+            }
+
             // GET /files/{id}
             if ($method === 'GET' && preg_match('#^/files/(\w+)$#', $path, $m)) {
                 $i = $this->items[$m[1]] ?? null;
@@ -76,6 +86,7 @@ class FakeWorkDrive
                 return Http::response(['data' => ['id' => $i['id'], 'type' => 'files', 'attributes' => [
                     'name' => $i['name'], 'is_folder' => $i['folder'], 'type' => $i['folder'] ? 'folder' : 'pdf',
                     'permalink' => "https://workdrive.zoho.com/" . ($i['folder'] ? 'folder' : 'file') . "/{$i['id']}",
+                    'parent_id' => $i['parent'] ?? null,
                 ]]]);
             }
 

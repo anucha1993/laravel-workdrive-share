@@ -4,57 +4,79 @@ namespace App\Services\WorkDrive;
 
 use App\Models\ShareGroup;
 use App\Models\SharePick;
-use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use Throwable;
 
 /**
- * นำเข้ารายการ pick จากไฟล์ Excel / CSV
- * คอลัมน์ A = หมวด, B = ลิงก์หรือ ID ของไฟล์/โฟลเดอร์ใน WorkDrive, C = หมายเหตุ (ไม่บังคับ)
- * แถวแรกเป็นหัวตารางได้ (ระบบข้ามแถวที่หา ID ไม่เจอให้อัตโนมัติ)
+ * เพิ่มรายการ pick จากข้อความหลายบรรทัด หรือจากไฟล์ Excel / CSV
+ * Excel: คอลัมน์ A = หมวด, B = ชื่อโฟลเดอร์ / path / ลิงก์ / ID, C = หมายเหตุ (ไม่บังคับ)
  */
 class PickImporter
 {
-    /** @return array{added:int,skipped:int,invalid:array<int,string>} */
-    public function import(ShareGroup $group, string $path, bool $replace = false): array
+    public function __construct(private FolderResolver $resolver)
     {
-        $rows = IOFactory::load($path)->getActiveSheet()->toArray(null, true, true, false);
+    }
+
+    /**
+     * @param array<int, array{0:string,1:string,2:string}> $rows [หมวด, ข้อความ, ป้ายบอกตำแหน่ง]
+     * @return array{added:int,skipped:int,invalid:array<int,string>}
+     */
+    public function addRows(ShareGroup $group, array $rows): array
+    {
         $result = ['added' => 0, 'skipped' => 0, 'invalid' => []];
 
-        DB::transaction(function () use ($group, $rows, $replace, &$result) {
-            if ($replace) {
-                $group->picks()->delete();
+        foreach ($rows as [$category, $source, $label]) {
+            try {
+                $found = $this->resolver->resolve($source, $group->company_folder_id);
+            } catch (Throwable $e) {
+                $result['invalid'][] = "{$label}: {$source} — {$e->getMessage()}";
+                continue;
             }
 
-            foreach ($rows as $i => $row) {
-                $category = trim((string) ($row[0] ?? ''));
-                $source = trim((string) ($row[1] ?? ''));
-                if ($category === '' && $source === '') {
-                    continue;
-                }
+            $pick = SharePick::firstOrCreate(
+                ['share_group_id' => $group->id, 'category' => $category, 'source_id' => $found['id']],
+                ['source' => $source, 'source_name' => $found['name'], 'status' => 'pending']
+            );
+            $pick->wasRecentlyCreated ? $result['added']++ : $result['skipped']++;
+        }
 
-                try {
-                    $id = WorkDriveClient::extractId($source);
-                } catch (Throwable) {
-                    if ($i > 0) { // แถวแรกถือเป็นหัวตาราง
-                        $result['invalid'][] = 'แถว ' . ($i + 1) . ": {$source}";
-                    }
-                    continue;
-                }
+        return $result;
+    }
 
-                if ($category === '') {
-                    $result['invalid'][] = 'แถว ' . ($i + 1) . ': ไม่มีชื่อหมวด';
-                    continue;
-                }
+    /** ข้อความหลายบรรทัด (บรรทัดละ 1 รายการ) ภายใต้หมวดเดียว */
+    public function importText(ShareGroup $group, string $category, string $text): array
+    {
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', $text)), 'strlen'));
 
-                $pick = SharePick::firstOrCreate(
-                    ['share_group_id' => $group->id, 'category' => $category, 'source_id' => $id],
-                    ['source' => $source, 'status' => 'pending']
-                );
-                $pick->wasRecentlyCreated ? $result['added']++ : $result['skipped']++;
+        return $this->addRows($group, array_map(fn ($l, $i) => [trim($category), $l, 'บรรทัด ' . ($i + 1)], $lines, array_keys($lines)));
+    }
+
+    public function import(ShareGroup $group, string $path, bool $replace = false): array
+    {
+        $sheet = IOFactory::load($path)->getActiveSheet()->toArray(null, true, true, false);
+        $rows = [];
+        $invalid = [];
+
+        foreach ($sheet as $i => $row) {
+            $category = trim((string) ($row[0] ?? ''));
+            $source = trim((string) ($row[1] ?? ''));
+            if ($i === 0 || ($category === '' && $source === '')) {
+                continue; // แถวแรกเป็นหัวตาราง
             }
-        });
+            if ($category === '' || $source === '') {
+                $invalid[] = 'แถว ' . ($i + 1) . ': ต้องมีทั้งหมวดและชื่อ/ลิงก์';
+                continue;
+            }
+            $rows[] = [$category, $source, 'แถว ' . ($i + 1)];
+        }
+
+        if ($replace) {
+            $group->picks()->delete();
+        }
+
+        $result = $this->addRows($group, $rows);
+        $result['invalid'] = array_merge($invalid, $result['invalid']);
 
         return $result;
     }
@@ -66,12 +88,13 @@ class PickImporter
         $sheet = $book->getActiveSheet();
         $sheet->setTitle('picks');
         $sheet->fromArray([
-            ['หมวด', 'ลิงก์หรือ ID (ไฟล์/โฟลเดอร์ WorkDrive)', 'หมายเหตุ'],
-            ['สัญญา', 'https://workdrive.zoho.com/file/xxxxxxxxxxxxxxxxxxxxxxxxx', 'ไฟล์เดียว'],
-            ['บัญชี', 'https://workdrive.zoho.com/folder/yyyyyyyyyyyyyyyyyyyyyyyyy', 'ทั้งโฟลเดอร์'],
+            ['หมวด', 'ชื่อโฟลเดอร์ / path / ลิงก์ WorkDrive', 'หมายเหตุ'],
+            ['เอกสารแรงงาน', 'MJ465023', 'ชื่อโฟลเดอร์ในบริษัทของกลุ่ม'],
+            ['เอกสารแรงงาน', 'MJ465023\\สัญญาจ้าง.pdf', 'path ข้างในโฟลเดอร์'],
+            ['สัญญา', 'https://workdrive.zoho.com/file/xxxxxxxxxxxxxxxxxxxxxxxxx', 'ลิงก์ตรง'],
         ]);
         $sheet->getStyle('A1:C1')->getFont()->setBold(true);
-        foreach (['A' => 18, 'B' => 70, 'C' => 25] as $col => $w) {
+        foreach (['A' => 18, 'B' => 70, 'C' => 30] as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
 

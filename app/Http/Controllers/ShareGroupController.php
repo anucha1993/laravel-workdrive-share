@@ -3,15 +3,18 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\ApplyShareGroup;
+use App\Jobs\RefreshCompanies;
 use App\Jobs\SendShareSummary;
 use App\Models\ShareGroup;
 use App\Models\SharePick;
 use App\Models\ShareRecipient;
+use App\Models\WdCompany;
 use App\Services\WorkDrive\PickImporter;
 use App\Services\WorkDrive\WorkDriveClient;
+use Throwable;
 use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use Throwable;
+use Illuminate\Support\Facades\Cache;
 
 class ShareGroupController extends Controller
 {
@@ -20,16 +23,55 @@ class ShareGroupController extends Controller
         $groups = ShareGroup::withCount(['picks', 'recipients', 'grants' => fn ($q) => $q->where('status', 'granted')])
             ->orderBy('name')->get();
 
-        return view('workdrive.index', compact('groups'));
+        $companies = WdCompany::orderBy('name')->pluck('name');
+        $companiesRefreshedAt = Cache::get('wd-companies-refreshed-at');
+
+        return view('workdrive.index', compact('groups', 'companies', 'companiesRefreshedAt'));
     }
 
-    /** สร้างกลุ่มแชร์ใหม่ (เช่น ชื่อบริษัท) — ไม่สร้างอะไรใน WorkDrive */
-    public function store(Request $request)
+    /** สร้างกลุ่มแชร์จากโฟลเดอร์บริษัทใต้ Accounts — ไม่สร้างอะไรใน WorkDrive */
+    public function store(Request $request, WorkDriveClient $wd)
     {
-        $data = $request->validate(['name' => 'required|string|max:200|unique:share_groups,name']);
-        $group = ShareGroup::create($data);
+        $data = $request->validate([
+            'company' => 'required|string|max:1000',
+            'name' => 'nullable|string|max:200',
+        ]);
 
-        return redirect()->route('workdrive.show', $group)->with('ok', 'สร้างกลุ่มแชร์แล้ว — เพิ่มรายการและอีเมลผู้รับได้เลย');
+        $input = trim($data['company']);
+        $company = WdCompany::where('name', $input)->first();
+
+        // บริษัทใหม่ที่ยังไม่อยู่ในรายชื่อ: วางลิงก์โฟลเดอร์บริษัทได้เลย (อ่านจาก Zoho ทันที 1 ครั้ง)
+        if (!$company && (str_contains($input, 'workdrive.zoho') || preg_match('/^[a-z0-9]{25,}$/', $input))) {
+            try {
+                $item = $wd->info(WorkDriveClient::extractId($input));
+            } catch (Throwable $e) {
+                return back()->withInput()->with('error', 'อ่านโฟลเดอร์จากลิงก์ไม่ได้: ' . $e->getMessage());
+            }
+            if (!WorkDriveClient::isFolder($item) || ($item['attributes']['parent_id'] ?? null) !== config('workdrive.company_root_id')) {
+                return back()->withInput()->with('error', 'ลิงก์นี้ไม่ใช่โฟลเดอร์บริษัทที่อยู่ใต้ Accounts');
+            }
+            $company = WdCompany::updateOrCreate(['folder_id' => $item['id']], ['name' => trim($item['attributes']['name'])]);
+        }
+
+        if (!$company) {
+            return back()->withInput()->with('error', "ไม่พบบริษัท \"{$data['company']}\" ในรายชื่อ — เลือกจากรายการ หรือกดรีเฟรชรายชื่อบริษัท");
+        }
+
+        $name = trim($data['name'] ?? '') ?: $company->name;
+        if (ShareGroup::where('name', $name)->exists()) {
+            return back()->withInput()->with('error', "มีกลุ่มชื่อ \"{$name}\" อยู่แล้ว — ตั้งชื่อกลุ่มใหม่ เช่น เพิ่มชื่อลูกค้าต่อท้าย");
+        }
+
+        $group = ShareGroup::create(['name' => $name, 'company_folder_id' => $company->folder_id, 'company_name' => $company->name]);
+
+        return redirect()->route('workdrive.show', $group)->with('ok', 'สร้างกลุ่มแชร์แล้ว — วางชื่อโฟลเดอร์และเพิ่มอีเมลผู้รับได้เลย');
+    }
+
+    public function refreshCompanies()
+    {
+        RefreshCompanies::dispatch();
+
+        return back()->with('ok', 'เข้าคิวอ่านรายชื่อบริษัทแล้ว ใช้เวลาประมาณ 5 นาที');
     }
 
     public function show(ShareGroup $group)
@@ -88,22 +130,16 @@ class ShareGroupController extends Controller
         return response()->streamDownload(fn () => $writer->save('php://output'), 'workdrive-picks-template.xlsx');
     }
 
-    public function addPick(Request $request, ShareGroup $group)
+    /** วางชื่อโฟลเดอร์ / path / ลิงก์ ได้หลายบรรทัด */
+    public function addPick(Request $request, ShareGroup $group, PickImporter $importer)
     {
-        $data = $request->validate(['category' => 'required|string|max:200', 'source' => 'required|string']);
+        $data = $request->validate(['category' => 'required|string|max:200', 'sources' => 'required|string|max:50000']);
 
-        try {
-            $id = WorkDriveClient::extractId($data['source']);
-        } catch (Throwable $e) {
-            return back()->with('error', $e->getMessage());
-        }
+        $r = $importer->importText($group, $data['category'], $data['sources']);
 
-        SharePick::firstOrCreate(
-            ['share_group_id' => $group->id, 'category' => trim($data['category']), 'source_id' => $id],
-            ['source' => $data['source'], 'status' => 'pending']
-        );
-
-        return back()->with('ok', 'เพิ่มรายการแล้ว — กด "แชร์ / อัปเดตสิทธิ์" เพื่อให้มีผล');
+        return back()->withInput($r['invalid'] ? $request->only('category') : [])
+            ->with($r['added'] || $r['skipped'] ? 'ok' : 'error', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']}, ไม่พบ " . count($r['invalid']) . ' — กด "แชร์ / อัปเดตสิทธิ์" เพื่อให้มีผล')
+            ->with('invalid', $r['invalid']);
     }
 
     public function removePick(ShareGroup $group, SharePick $pick)

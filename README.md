@@ -8,8 +8,12 @@
 
 ## การใช้งาน
 
-1. สร้าง **กลุ่มแชร์** (เช่น ชื่อบริษัท)
-2. เพิ่ม **รายการ** (หมวด + ลิงก์ไฟล์/โฟลเดอร์) ทีละรายการ หรืออัปโหลด Excel (A = หมวด, B = ลิงก์หรือ ID)
+1. สร้าง **กลุ่มแชร์** โดยเลือกบริษัท (โฟลเดอร์ใต้ `Zoho CRM - Workdrive / Accounts`)
+2. **วางชื่อโฟลเดอร์** ได้หลายบรรทัดพร้อมกัน เช่น `MJ465023` ระบบหา ID ในโฟลเดอร์บริษัทให้เอง
+   - path ข้างใน: `MJ465023\สัญญาจ้าง.pdf`
+   - บริษัทอื่น: `\ชื่อบริษัท\MJ470001`
+   - หรือวางลิงก์/ID ก็ได้ · Excel ใช้ได้เหมือนกัน (A = หมวด, B = ชื่อ/path/ลิงก์)
+   - รายชื่อบริษัท (~2,600) เก็บไว้ในระบบ อัปเดตทุกคืนตีสอง หรือกดปุ่มรีเฟรช (ใช้เวลาราว 5 นาที) / `php artisan workdrive:companies`
 3. เพิ่ม **อีเมลผู้รับภายนอก** (ใส่ได้หลายอีเมลพร้อมกัน)
 4. กด **แชร์ / อัปเดตสิทธิ์** ระบบเข้าคิวแล้วทำงานดังนี้
    - ให้สิทธิ์ที่ยังขาด: `POST /permissions` (ไฟล์ role 34, โฟลเดอร์ role 6 = ดูอย่างเดียว) แล้วเก็บ `permission_id`
@@ -45,6 +49,7 @@ WorkDrive.files.READ,WorkDrive.files.sharing.CREATE,WorkDrive.files.sharing.DELE
 |---|---|
 | `WORKDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` | Self Client (A) |
 | `ZOHO_LOGIN_CLIENT_ID/SECRET` | Server-based Application (B) |
+| `WORKDRIVE_COMPANY_ROOT_ID` | ID โฟลเดอร์ Accounts (อ่านรายชื่อบริษัทเท่านั้น) = `cwc2r5999776637444d39802906b76cf9f27c` |
 | `WORKDRIVE_REQUEST_DELAY_MS` | หน่วงเวลาระหว่างคำขอ API |
 | `WORKDRIVE_ZOHO_NOTIFICATION` | ให้ Zoho ส่งอีเมลแจ้งเองด้วยหรือไม่ (ค่าเริ่มต้น false เพราะระบบส่งอีเมลสรุปเอง) |
 | `MAIL_*` | SMTP สำหรับส่งอีเมลสรุปลิงก์ |

@@ -7,6 +7,9 @@
 <div class="flex flex-wrap items-start justify-between gap-3">
   <div>
     <h1 class="text-xl font-semibold">{{ $group->name }}</h1>
+    @if ($group->company_name && $group->company_name !== $group->name)
+      <p class="muted">บริษัท: {{ $group->company_name }}</p>
+    @endif
     <p class="muted">แชร์ล่าสุด {{ $group->last_applied_at?->format('d/m/Y H:i') ?? '—' }} {{ $group->last_result }}</p>
   </div>
   <form method="post" action="{{ route('workdrive.apply', $group) }}" class="flex flex-col items-end gap-1">
@@ -71,17 +74,25 @@
           <a class="btn-light" href="{{ route('workdrive.template') }}">ไฟล์ตัวอย่าง</a>
         </div>
       </form>
-      <p class="muted mt-2">คอลัมน์ A = หมวด, B = ลิงก์หรือ ID ของไฟล์/โฟลเดอร์ใน WorkDrive</p>
+      <p class="muted mt-2">คอลัมน์ A = หมวด, B = ชื่อโฟลเดอร์ / path / ลิงก์ WorkDrive</p>
     </div>
     <div>
-      <h2 class="card-title">เพิ่มทีละรายการ</h2>
+      <h2 class="card-title">วางชื่อโฟลเดอร์ (หลายรายการพร้อมกัน)</h2>
       <form method="post" action="{{ route('workdrive.picks.add', $group) }}" class="space-y-2">
         @csrf
-        <input type="text" name="category" class="input" placeholder="หมวด เช่น สัญญา" list="cats" required>
-        <input type="text" name="source" class="input" placeholder="วางลิงก์ไฟล์หรือโฟลเดอร์จาก WorkDrive" required>
+        <input type="text" name="category" class="input" placeholder="หมวด เช่น เอกสารแรงงาน" list="cats" value="{{ old('category') }}" required>
+        <textarea name="sources" rows="6" class="input font-mono" required
+                  placeholder="บรรทัดละ 1 รายการ เช่น&#10;MJ465023&#10;MJ465024&#10;MJ465023\สัญญาจ้าง.pdf&#10;\ชื่อบริษัทอื่น\MJ470001&#10;หรือวางลิงก์ WorkDrive"></textarea>
         <button class="btn">เพิ่ม</button>
         <datalist id="cats">@foreach ($picksByCategory->keys() as $c)<option value="{{ $c }}">@endforeach</datalist>
       </form>
+      <p class="muted mt-2">
+        @if ($group->company_name)
+          ชื่อที่วางจะค้นหาในโฟลเดอร์ <b>{{ $group->company_name }}</b> · ขึ้นต้นด้วย \ เพื่อระบุบริษัทอื่น
+        @else
+          กลุ่มนี้ไม่ได้ผูกบริษัท — ใช้ path เต็ม (\ชื่อบริษัท\โฟลเดอร์) หรือวางลิงก์
+        @endif
+      </p>
     </div>
   </div>
 </div>

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ShareGroup extends Model
 {
-    protected $fillable = ['name', 'last_applied_at', 'last_result'];
+    protected $fillable = ['name', 'company_folder_id', 'company_name', 'last_applied_at', 'last_result'];
 
     protected $casts = ['last_applied_at' => 'datetime'];
 

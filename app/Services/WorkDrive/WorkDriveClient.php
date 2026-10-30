@@ -109,6 +109,29 @@ class WorkDriveClient
         return $this->call('GET', "/files/{$id}")['data'];
     }
 
+    /** รายการในโฟลเดอร์ (อ่านอย่างเดียว) — เก็บเฉพาะ id/ชื่อ/ชนิด เพราะ response มีขนาดราว 14 KB ต่อรายการ */
+    public function children(string $folderId): array
+    {
+        $out = [];
+        $offset = 0;
+        do {
+            $page = $this->call('GET', "/files/{$folderId}/files", [
+                'page[limit]' => 50,
+                'page[offset]' => $offset,
+            ])['data'] ?? [];
+            foreach ($page as $item) {
+                $out[] = [
+                    'id' => $item['id'],
+                    'name' => $item['attributes']['name'] ?? '',
+                    'is_folder' => self::isFolder($item),
+                ];
+            }
+            $offset += 50;
+        } while (count($page) === 50);
+
+        return $out;
+    }
+
     public static function isFolder(array $item): bool
     {
         $a = $item['attributes'] ?? [];

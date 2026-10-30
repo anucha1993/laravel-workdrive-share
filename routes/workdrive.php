@@ -18,6 +18,7 @@ Route::middleware(['web', BreakOutOfIframe::class, 'auth'])->prefix('workdrive')
     Route::get('/', [C::class, 'index'])->name('index');
     Route::post('/', [C::class, 'store'])->name('store');
     Route::get('/template', [C::class, 'template'])->name('template');
+    Route::post('/companies/refresh', [C::class, 'refreshCompanies'])->name('companies.refresh');
     Route::get('/{group}', [C::class, 'show'])->name('show');
     Route::delete('/{group}', [C::class, 'destroy'])->name('destroy');
     Route::get('/{group}/history', [C::class, 'history'])->name('history');
