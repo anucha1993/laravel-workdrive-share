@@ -155,8 +155,7 @@ class FolderPickTest extends TestCase
         $this->assertSame('MJ470001', $group->picks()->where('source_id', $this->otherMj)->value('source_name'));
 
         $this->withoutVite()->actingAs($this->user)->get("/workdrive/{$group->id}")
-            ->assertSee("https://workdrive.zoho.com/folder/{$this->mj1}", false)
-            ->assertSee('เปิด ↗');
+            ->assertSee("https://workdrive.zoho.com/folder/{$this->mj1}", false);
     }
 
     public function test_company_must_be_chosen_from_list(): void

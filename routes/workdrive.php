@@ -15,8 +15,15 @@ Route::middleware(['web', BreakOutOfIframe::class])->group(function () {
     Route::post('/logout', [ZohoAuthController::class, 'logout'])->name('logout');
 });
 
-// ลิงก์หลักสำหรับลูกค้า (หน้าสารบัญ ไม่ต้อง Login)
-Route::middleware(['web', 'throttle:60,1'])->get('/s/{token}', [PublicShareController::class, 'show'])->name('public.share');
+// ลิงก์ลูกค้า: หน้าเบราว์เซอร์ไฟล์ (ไม่ต้อง Login ระบบนี้ — ตรวจสิทธิ์ทุก request ใน controller)
+Route::middleware(['web', 'throttle:120,1'])->prefix('s/{token}')->name('public.')->group(function () {
+    Route::get('/', [PublicShareController::class, 'show'])->name('share');
+    Route::get('/c/{category}', [PublicShareController::class, 'show'])->name('category');
+    Route::get('/f/{id}', [PublicShareController::class, 'folder'])->name('folder');
+    Route::get('/d/{id}', [PublicShareController::class, 'download'])->name('download');
+    Route::get('/zip/{id?}', [PublicShareController::class, 'zip'])->name('zip');
+    Route::post('/unlock', [PublicShareController::class, 'unlock'])->middleware('throttle:10,1')->name('unlock');
+});
 
 Route::middleware(['web', BreakOutOfIframe::class, 'auth'])->prefix('workdrive')->name('workdrive.')->group(function () {
     Route::get('/', [C::class, 'index'])->name('index');
@@ -28,10 +35,8 @@ Route::middleware(['web', BreakOutOfIframe::class, 'auth'])->prefix('workdrive')
     Route::get('/{group}/history', [C::class, 'history'])->name('history');
     Route::post('/{group}/import', [C::class, 'import'])->name('import');
     Route::post('/{group}/picks', [C::class, 'addPick'])->name('picks.add');
+    Route::post('/{group}/picks/select', [C::class, 'selectPicks'])->name('picks.select');
     Route::delete('/{group}/picks/{pick}', [C::class, 'removePick'])->name('picks.remove');
-    Route::post('/{group}/recipients', [C::class, 'addRecipients'])->name('recipients.add');
-    Route::delete('/{group}/recipients/{recipient}', [C::class, 'removeRecipient'])->name('recipients.remove');
-    Route::post('/{group}/apply', [C::class, 'apply'])->name('apply');
-    Route::post('/{group}/summary', [C::class, 'resendSummary'])->name('summary');
+    Route::post('/{group}/link', [C::class, 'updateLink'])->name('link.update');
     Route::post('/{group}/public-link', [C::class, 'regeneratePublicLink'])->name('public-link');
 });

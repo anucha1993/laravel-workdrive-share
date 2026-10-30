@@ -115,13 +115,12 @@ class ZohoLoginTest extends TestCase
         $this->withoutVite();
         $user = User::factory()->create();
 
-        $this->actingAs($user)->get('/workdrive')->assertOk()->assertSee('กลุ่มแชร์ภายนอก');
+        $this->actingAs($user)->get('/workdrive')->assertOk()->assertSee('ลิงก์ลูกค้า');
 
-        $folder = \App\Models\ShareGroup::create(['name' => 'บริษัท A']);
-        $folder->runs()->create(['trigger' => 'manual', 'status' => 'partial', 'errors' => 1, 'log' => 'เปิดต้นฉบับไม่ได้ xyz',
-                                 'started_at' => now()->subMinute(), 'finished_at' => now()]);
+        $group = \App\Models\ShareGroup::create(['name' => 'บริษัท A']);
+        \App\Models\ShareAccessLog::create(['share_group_id' => $group->id, 'action' => 'download', 'name' => 'ไฟล์ทดสอบ.pdf', 'ip' => '1.2.3.4']);
 
-        $this->actingAs($user)->get("/workdrive/{$folder->id}")->assertOk()->assertSee('ผิดพลาดบางส่วน')->assertSee('กดแชร์');
-        $this->actingAs($user)->get("/workdrive/{$folder->id}/history")->assertOk()->assertSee('เปิดต้นฉบับไม่ได้ xyz');
+        $this->actingAs($user)->get("/workdrive/{$group->id}")->assertOk()->assertSee('ลิงก์สำหรับส่งลูกค้า')->assertSee('ไฟล์ทดสอบ.pdf');
+        $this->actingAs($user)->get("/workdrive/{$group->id}/history")->assertOk()->assertSee('ไฟล์ทดสอบ.pdf');
     }
 }

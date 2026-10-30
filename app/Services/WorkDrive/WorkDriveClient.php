@@ -11,7 +11,7 @@ use RuntimeException;
 
 /**
  * เรียก Zoho WorkDrive REST API v1
- * ใช้เฉพาะ: อ่านข้อมูลไฟล์/โฟลเดอร์, เพิ่มสิทธิ์แชร์, ถอนสิทธิ์แชร์ — ไม่มีคำสั่งแก้ ย้าย หรือลบไฟล์
+ * อ่านอย่างเดียว: ข้อมูลไฟล์/โฟลเดอร์, รายการในโฟลเดอร์, ดาวน์โหลด — ไม่มีคำสั่งแก้ ย้าย ลบ หรือแชร์
  */
 class WorkDriveClient
 {
@@ -120,11 +120,7 @@ class WorkDriveClient
                 'page[offset]' => $offset,
             ])['data'] ?? [];
             foreach ($page as $item) {
-                $out[] = [
-                    'id' => $item['id'],
-                    'name' => $item['attributes']['name'] ?? '',
-                    'is_folder' => self::isFolder($item),
-                ];
+                $out[] = self::summary($item);
             }
             $offset += 50;
         } while (count($page) === 50);
@@ -132,40 +128,49 @@ class WorkDriveClient
         return $out;
     }
 
+    /** ข้อมูลที่ระบบใช้จาก 1 รายการ (response เต็มมีราว 14 KB ต่อรายการ) */
+    public static function summary(array $item): array
+    {
+        $a = $item['attributes'] ?? [];
+
+        return [
+            'id' => $item['id'],
+            'name' => $a['name'] ?? '',
+            'is_folder' => self::isFolder($item),
+            'type' => $a['type'] ?? null,
+            'extn' => $a['extn'] ?? null,
+            'size' => $a['storage_info']['size_in_bytes'] ?? null,
+            'modified' => isset($a['modified_time_in_millisecond']) ? (int) $a['modified_time_in_millisecond'] : null,
+            'parent_id' => $a['parent_id'] ?? null,
+        ];
+    }
+
+    /**
+     * ดาวน์โหลดไฟล์แบบ stream (ไม่เก็บทั้งไฟล์ไว้ในหน่วยความจำ)
+     * ต้องมี scope WorkDrive.files.READ หรือ ZohoFiles.files.READ
+     * $format ใช้แปลงไฟล์ของ Zoho (Writer/Sheet/Show) เป็น docx/xlsx/pptx
+     */
+    public function download(string $id, ?string $format = null): \Psr\Http\Message\ResponseInterface
+    {
+        $this->pace();
+        $url = 'https://download.zoho.' . config('workdrive.dc', 'com') . "/v1/workdrive/download/{$id}";
+
+        $res = Http::withHeaders(['Authorization' => 'Zoho-oauthtoken ' . $this->token()])
+            ->withOptions(['stream' => true])
+            ->timeout(600)
+            ->get($url, $format ? ['format' => $format] : []);
+
+        if (!$res->successful()) {
+            throw new WorkDriveException('GET', "download/{$id}", $res->status(),
+                ['errors' => [['id' => $res->json('ERROR_MESSAGE'), 'title' => mb_substr($res->body(), 0, 200)]]], $res->body());
+        }
+
+        return $res->toPsrResponse();
+    }
+
     public static function isFolder(array $item): bool
     {
         $a = $item['attributes'] ?? [];
         return !empty($a['is_folder']) || ($a['type'] ?? null) === 'folder';
-    }
-
-    // ------------------------------------------------------------ sharing
-    /** ให้สิทธิ์ดูอย่างเดียวแก่อีเมล คืนค่า permission_id */
-    public function grantView(string $resourceId, string $email, bool $isFolder): string
-    {
-        $res = $this->call('POST', '/permissions', ['data' => [
-            'type' => 'permissions',
-            'attributes' => [
-                'resource_id' => $resourceId,
-                'shared_type' => 'personal',
-                'email_id' => $email,
-                'role_id' => $isFolder ? config('workdrive.folder_view_role_id') : config('workdrive.file_view_role_id'),
-                'send_notification_mail' => (bool) config('workdrive.zoho_notification'),
-            ],
-        ]]);
-
-        $d = $res['data'] ?? [];
-        $d = array_is_list($d) ? ($d[0] ?? []) : $d;
-        $id = $d['id'] ?? $d['attributes']['permissionid'] ?? null;
-        if (!$id) {
-            throw new RuntimeException('ไม่พบ permission id ใน response: ' . mb_substr(json_encode($res, JSON_UNESCAPED_UNICODE), 0, 300));
-        }
-
-        return $id;
-    }
-
-    /** ถอนสิทธิ์ที่เคยให้ไว้ */
-    public function revoke(string $permissionId): void
-    {
-        $this->call('DELETE', "/permissions/{$permissionId}");
     }
 }

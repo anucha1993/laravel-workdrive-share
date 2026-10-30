@@ -1,93 +1,81 @@
 # WorkDrive Share (Laravel 12)
 
-แชร์ไฟล์/โฟลเดอร์ใน Zoho WorkDrive ให้บุคคลภายนอก โดย **ให้สิทธิ์ "ดูอย่างเดียว" บนต้นฉบับโดยตรง**
-ไม่คัดลอก ไม่ย้าย ไม่แก้ และไม่ลบไฟล์ต้นฉบับ ระบบแตะเฉพาะสิทธิ์แชร์ที่ระบบเป็นผู้ให้เท่านั้น
+หน้าเบราว์เซอร์ไฟล์บนโดเมนของเรา สำหรับส่งเอกสารใน Zoho WorkDrive ให้ลูกค้า (Account)
+**1 ลิงก์ต่อ 1 ลูกค้า** — ลูกค้าเห็นเฉพาะรายการที่ pick ไว้ เปิดดู/ดาวน์โหลดผ่านเซิร์ฟเวอร์เรา
+ไม่ copy ไม่ sync ไม่แชร์สิทธิ์ใน WorkDrive และไม่แก้ ย้าย หรือลบต้นฉบับ (ใช้ API อ่านอย่างเดียว)
 
-- URL: https://www.workdrive.trackingmouthefirst.com
-- ลิงก์ Login ที่นำไปแปะใน Zoho: https://www.workdrive.trackingmouthefirst.com/auth/zoho
+- ระบบ: https://www.workdrive.trackingmouthefirst.com (Login ด้วย Zoho เฉพาะ @thefirstgoodmangroup.com)
+- ลิงก์ลูกค้า: `https://www.workdrive.trackingmouthefirst.com/s/{token}`
 
-## การใช้งาน
+## ฝั่งพนักงาน
 
-1. สร้าง **กลุ่มแชร์** โดยเลือกบริษัท (โฟลเดอร์ใต้ `Zoho CRM - Workdrive / Accounts`)
-2. **วางชื่อโฟลเดอร์** ได้หลายบรรทัดพร้อมกัน เช่น `MJ465023` ระบบหา ID ในโฟลเดอร์บริษัทให้เอง
-   - path ข้างใน: `MJ465023\สัญญาจ้าง.pdf`
-   - บริษัทอื่น: `\ชื่อบริษัท\MJ470001`
-   - หรือวางลิงก์/ID ก็ได้ · Excel ใช้ได้เหมือนกัน (A = หมวด, B = ชื่อ/path/ลิงก์)
-   - รายชื่อบริษัท (~2,600) เก็บไว้ในระบบ อัปเดตทุกคืนตีสอง หรือกดปุ่มรีเฟรช (ใช้เวลาราว 5 นาที) / `php artisan workdrive:companies`
-3. เพิ่ม **อีเมลผู้รับภายนอก** (ใส่ได้หลายอีเมลพร้อมกัน)
-4. กด **แชร์ / อัปเดตสิทธิ์** ระบบเข้าคิวแล้วทำงานดังนี้
-   - ให้สิทธิ์ที่ยังขาด: `POST /permissions` (ไฟล์ role 34, โฟลเดอร์ role 6 = ดูอย่างเดียว) แล้วเก็บ `permission_id`
-   - ถอนสิทธิ์ของรายการ/อีเมลที่เอาออก: `DELETE /permissions/{permission_id}`
-   - ส่งอีเมลสรุปลิงก์ แยกตามหมวด ให้ผู้ที่ได้สิทธิ์ใหม่
-5. ลบกลุ่ม = ถอนสิทธิ์ทั้งหมดก่อน แล้วจึงลบ
+1. สร้างลิงก์ลูกค้า: เลือกลูกค้าจากโฟลเดอร์ใต้ `Zoho CRM - Workdrive / Accounts` (หรือวางลิงก์โฟลเดอร์ลูกค้าใหม่)
+2. Pick รายการ 3 วิธี
+   - ติ๊กเลือกจากโฟลเดอร์ลูกค้า (ดึงสด กดเข้าโฟลเดอร์ย่อยได้)
+   - วางชื่อโฟลเดอร์หลายบรรทัด เช่น `MH468133`
+   - Excel (A = หมวด ไม่บังคับ, B = ชื่อโฟลเดอร์)
+3. ตั้งค่าลิงก์: รหัสผ่าน, วันหมดอายุ, เปิด/ปิด, สร้างลิงก์ใหม่ (เพิกถอนลิงก์เดิม)
+4. ดู log การเข้าดู/ดาวน์โหลดของลูกค้า
 
-## กลไกกันความผิดพลาด
+## ฝั่งลูกค้า (`/s/{token}`)
 
-- ต้นฉบับที่เปิดไม่ได้ในรอบนั้นจะไม่ถูกแชร์เพิ่ม แต่สิทธิ์เดิมยังคงอยู่ (ไม่ถอน)
-- ถ้าไฟล์เดียวกันถูกแชร์ให้อีเมลเดียวกันจากหลายกลุ่ม จะใช้สิทธิ์ร่วมกัน และไม่ถอนจนกว่าทุกกลุ่มจะเอาออก
-- แชร์ไม่สำเร็จ (เช่น R910 แอดมินไม่อนุญาตแชร์ภายนอก) จะแสดงเหตุผลภาษาไทย และลองใหม่เมื่อกดแชร์ครั้งถัดไป
-- หน่วงเวลาระหว่างคำขอ API (`WORKDRIVE_REQUEST_DELAY_MS` ค่าเริ่มต้น 700 ms) และถ้าเจอ 429 จะรอ 5/10/20 วินาทีแล้วลองใหม่
-- มี lock กันทำงานซ้อนในกลุ่มเดียวกัน และบันทึกประวัติทุกรอบ (ตาราง `share_runs`)
+- หน้าตาแบบ WorkDrive: breadcrumb (ชื่อลูกค้าเป็นโฟลเดอร์บนสุด), Name, Last Modified, Size
+- เห็นเฉพาะรายการที่ pick (Associated Contacts / Deals และอื่นๆ ถูกซ่อน) กดเข้าโฟลเดอร์ย่อยได้ (ดึงสดจาก API)
+- ดาวน์โหลดรายไฟล์ และ "ดาวน์โหลดทั้งหมด" เป็น ZIP (stream ทีละไฟล์ ไม่เก็บบนเซิร์ฟเวอร์)
+- ไฟล์ Zoho Writer/Sheet/Show แปลงเป็น docx/xlsx/pptx ตอนดาวน์โหลด
+- ซ่อนไฟล์ระบบ (Thumbs.db, desktop.ini, .DS_Store)
+
+## ความปลอดภัย
+
+- ทุก request ตรวจว่า resource อยู่ใต้รายการที่ pick โดยไล่ `parent_id` ขึ้นไป — ไม่อยู่ = 404 และบันทึก log `denied`
+- token ลิงก์สุ่ม 40 ตัว, รหัสผ่าน (bcrypt), วันหมดอายุ, ปิด/เพิกถอนได้, throttle, `noindex`, `no-referrer`
+- token ของ Zoho อยู่ฝั่งเซิร์ฟเวอร์เท่านั้น ไฟล์ส่งผ่านเซิร์ฟเวอร์เรา
+- บันทึกทุกการเปิด/ดาวน์โหลด/ใส่รหัสผ่าน (ตาราง `share_access_logs`) พร้อม IP
 
 ## ตั้งค่า Zoho (api-console.zoho.com, DC .com)
 
-**A) Self Client — ให้ระบบแชร์สิทธิ์** (ใช้บัญชีที่มีสิทธิ์แชร์ไฟล์ต้นฉบับ)
+**A) Self Client** (อ่านอย่างเดียว)
 ```
-WorkDrive.files.READ,WorkDrive.files.sharing.CREATE,WorkDrive.files.sharing.DELETE
+WorkDrive.files.READ,ZohoFiles.files.READ
 ```
-(หรือ `WorkDrive.files.ALL,WorkDrive.files.sharing.ALL`)
+แลก Grant code เป็น refresh token (ทำในเครื่องตัวเอง ห้ามแปะ secret ลงแชต/โค้ด):
+```
+curl.exe -X POST https://accounts.zoho.com/oauth/v2/token -d grant_type=authorization_code -d client_id=... -d client_secret=... -d code=GRANT_CODE
+```
 
-**B) Server-based Application — ให้ผู้ใช้ Login** (OpenID Connect, รับเฉพาะ `@thefirstgoodmangroup.com`)
+**B) Server-based Application** (Login พนักงาน, OpenID Connect)
 - Homepage URL: `https://www.workdrive.trackingmouthefirst.com`
-- Authorized Redirect URI: `https://www.workdrive.trackingmouthefirst.com/auth/zoho/callback`
+- Redirect URI: `https://www.workdrive.trackingmouthefirst.com/auth/zoho/callback`
 
-**Admin Console ของ WorkDrive**: เปิด External Sharing → แชร์ให้อีเมลภายนอก
-
-## ค่าใน `.env` (ดู `.env.example` — ค่าลับอยู่ใน `.env` เท่านั้น)
+## `.env`
 
 | ค่า | ความหมาย |
 |---|---|
 | `WORKDRIVE_CLIENT_ID/SECRET/REFRESH_TOKEN` | Self Client (A) |
+| `WORKDRIVE_COMPANY_ROOT_ID` | ID โฟลเดอร์ Accounts = `cwc2r5999776637444d39802906b76cf9f27c` |
+| `WORKDRIVE_REQUEST_DELAY_MS` | หน่วงเวลาระหว่างคำขอ API (ค่าเริ่มต้น 700) |
 | `ZOHO_LOGIN_CLIENT_ID/SECRET` | Server-based Application (B) |
-| `WORKDRIVE_COMPANY_ROOT_ID` | ID โฟลเดอร์ Accounts (อ่านรายชื่อบริษัทเท่านั้น) = `cwc2r5999776637444d39802906b76cf9f27c` |
-| `WORKDRIVE_REQUEST_DELAY_MS` | หน่วงเวลาระหว่างคำขอ API |
-| `WORKDRIVE_ZOHO_NOTIFICATION` | ให้ Zoho ส่งอีเมลแจ้งเองด้วยหรือไม่ (ค่าเริ่มต้น false เพราะระบบส่งอีเมลสรุปเอง) |
-| `MAIL_*` | SMTP สำหรับส่งอีเมลสรุปลิงก์ |
 
 ## ติดตั้งบน Plesk
 
-1. PHP 8.2 ขึ้นไป (pdo_mysql, zip, gd, mbstring, intl, fileinfo)
-2. อัปโหลดโค้ด (รวม `public/build` ที่ build แล้วด้วย `npm run build`) แล้วรัน
+1. PHP 8.2+ · Document root = `<โปรเจกต์>/public` · Let's Encrypt (รวม www) · Preferred domain = www
+2. `git pull` แล้วรัน
    ```
    composer install --no-dev --optimize-autoloader
    php artisan migrate --force
    php artisan config:cache && php artisan route:cache && php artisan view:cache
    ```
-   `.env` บนเซิร์ฟเวอร์: `APP_ENV=production`, `APP_DEBUG=false`
-3. Hosting Settings → Document root = `<โฟลเดอร์โปรเจกต์>/public`
-4. SSL/TLS → Let's Encrypt (ทั้งโดเมนมีและไม่มี www) + redirect HTTP → HTTPS
-5. Hosting Settings → Preferred domain = `www.workdrive.trackingmouthefirst.com` (มี rule สำรองใน `public/.htaccess`)
-6. Scheduled Tasks → ทุกนาที (`* * * * *`)
+   (`public/build` อยู่ใน git แล้ว ไม่ต้องมี Node บนเซิร์ฟเวอร์)
+3. Scheduled Task ทุกนาที (อัปเดตรายชื่อลูกค้าทุกคืน + คิว)
    ```
-   cd /var/www/vhosts/<โดเมน>/<โฟลเดอร์โปรเจกต์> && /opt/plesk/php/8.3/bin/php artisan schedule:run
+   cd /var/www/vhosts/trackingmouthefirst.com/workdrive.trackingmouthefirst.com && /opt/plesk/php/8.4/bin/php artisan schedule:run
    ```
-   ตัวนี้จะประมวลผลคิว (แชร์/ถอนสิทธิ์/ส่งอีเมล) ทุกนาที จึงไม่ต้องมี queue worker ค้างไว้
-7. ให้ `storage/` และ `bootstrap/cache/` เขียนได้
-
-## Login ใน Zoho CRM (Web Tab)
-
-หน้า Login ของ Zoho ไม่ยอมให้แสดงใน iframe (`X-Frame-Options: SAMEORIGIN`) ถ้าเปิดใน Web Tab ระบบจะแสดงปุ่ม "เปิดในแท็บใหม่"
-แนะนำตั้ง Web Tab ให้เปิดในแท็บใหม่ตั้งแต่แรก
+4. ไฟล์ ZIP ใหญ่: ให้ PHP-FPM / nginx timeout พอ (โค้ดตั้ง `set_time_limit(0)` และส่ง `X-Accel-Buffering: no` แล้ว)
 
 ## คำสั่ง
 
 ```
-php artisan workdrive:check <ลิงก์หรือ ID>...   # ตรวจการเชื่อมต่อและอ่านข้อมูลไฟล์ (อ่านอย่างเดียว)
-php artisan workdrive:apply "บริษัท A"          # แชร์/ถอนสิทธิ์ของกลุ่ม (--no-mail = ไม่ส่งอีเมล)
-php artisan test                                # Feature test (mock Zoho API ด้วย Http::fake)
+php artisan workdrive:check <ลิงก์หรือ ID>   # ทดสอบการเชื่อมต่อ (อ่านอย่างเดียว)
+php artisan workdrive:companies               # อ่านรายชื่อลูกค้าใต้ Accounts (~5 นาที)
+php artisan test                              # Feature test (mock Zoho API ด้วย Http::fake)
 ```
-
-## อ้างอิงเอกสาร Zoho
-
-- OpenAPI ทางการ: https://github.com/zoho/zohoworkdrive-oas (`file_folder_sharing.json`: POST/DELETE `/permissions`)
-- Login: https://www.zoho.com/accounts/protocol/oauth/sign-in-using-zoho.html

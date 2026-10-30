@@ -18,6 +18,7 @@ class WorkDriveException extends RuntimeException
         'R953' => 'ไม่ได้เปิดสิทธิ์แชร์ให้ผู้ที่ไม่มีบัญชี Zoho',
         'R955' => 'จำกัดการแชร์ทรัพยากรนี้ออกนอกองค์กร',
         'R214' => 'ไม่รู้จักอีเมลผู้รับ',
+        'INVALID_OAUTHSCOPE' => 'token ไม่มีสิทธิ์ดาวน์โหลด — ต้องขอ refresh token ใหม่ที่มี scope WorkDrive.files.READ,ZohoFiles.files.READ',
     ];
 
     public ?string $zohoCode;

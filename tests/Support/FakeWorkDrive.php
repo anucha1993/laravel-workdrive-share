@@ -7,23 +7,18 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * WorkDrive จำลองในหน่วยความจำ สำหรับใช้กับ Http::fake
- * รูปแบบ request/response อ้างอิงเอกสาร WorkDrive API v1 (files, permissions)
+ * รูปแบบ request/response อ้างอิงเอกสาร WorkDrive API v1 (files, download)
  */
 class FakeWorkDrive
 {
-    /** @var array<string, array{id:string,name:string,folder:bool,status:int,parent:?string}> */
+    /** @var array<string, array{id:string,name:string,folder:bool,status:int,parent:?string,type:string,extn:string}> */
     public array $items = [];
 
-    /** สิทธิ์ที่มีอยู่ใน WorkDrive: permission_id => [resource_id, email, role_id, notify] */
-    public array $permissions = [];
-
-    /** @var array<int, array{method:string,path:string,body:array}> */
+    /** @var array<int, array{method:string,path:string,query:array}> */
     public array $requests = [];
 
-    /** อีเมลที่ WorkDrive ปฏิเสธการแชร์ (จำลองแอดมินไม่อนุญาตโดเมนนี้) */
-    public array $blockedEmails = [];
-
-    private int $seq = 0;
+    /** ให้ download ตอบ INVALID_OAUTHSCOPE (จำลอง token ไม่มี scope ดาวน์โหลด) */
+    public bool $downloadScopeMissing = false;
 
     public static function id(string $prefix): string
     {
@@ -32,27 +27,35 @@ class FakeWorkDrive
 
     public function addFolder(string $id, string $name, ?string $parent = null): string
     {
-        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => true, 'status' => 1, 'parent' => $parent];
+        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => true, 'status' => 1, 'parent' => $parent, 'type' => 'folder', 'extn' => ''];
         return $id;
     }
 
-    public function addFile(string $id, string $name, ?string $parent = null): string
+    public function addFile(string $id, string $name, ?string $parent = null, string $type = 'pdf'): string
     {
-        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => false, 'status' => 1, 'parent' => $parent];
+        $extn = $type === 'writer' ? '' : strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        $this->items[$id] = ['id' => $id, 'name' => $name, 'folder' => false, 'status' => 1, 'parent' => $parent, 'type' => $type, 'extn' => $extn];
         return $id;
     }
 
-    /** สิทธิ์ที่มีอยู่จริงตอนนี้ ในรูป "resource|email" */
-    public function shared(): array
+    public static function content(string $id, ?string $format = null): string
     {
-        $out = array_map(fn ($p) => "{$p['resource_id']}|{$p['email']}", $this->permissions);
-        sort($out);
-        return $out;
+        return "content-of-{$id}" . ($format ? ".{$format}" : '');
     }
 
     public function writes(): array
     {
         return array_values(array_filter($this->requests, fn ($r) => $r['method'] !== 'GET'));
+    }
+
+    private function attributes(array $i): array
+    {
+        return [
+            'name' => $i['name'], 'is_folder' => $i['folder'], 'type' => $i['type'], 'extn' => $i['extn'],
+            'parent_id' => $i['parent'], 'modified_time_in_millisecond' => 1760000000000,
+            'storage_info' => ['size_in_bytes' => $i['folder'] ? 0 : 1234],
+            'permalink' => 'https://workdrive.zoho.com/' . ($i['folder'] ? 'folder' : 'file') . "/{$i['id']}",
+        ];
     }
 
     public function fake(): void
@@ -62,19 +65,27 @@ class FakeWorkDrive
                 return Http::response(['access_token' => 'fake-token', 'expires_in' => 3600]);
             }
 
-            $path = substr(parse_url($request->url(), PHP_URL_PATH), strlen('/workdrive/api/v1'));
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $q);
             $method = $request->method();
-            $body = $request->data();
-            $this->requests[] = ['method' => $method, 'path' => $path, 'body' => $body];
+            $full = parse_url($request->url(), PHP_URL_PATH);
+            $this->requests[] = ['method' => $method, 'path' => $full, 'query' => $q];
+
+            // GET https://download.zoho.com/v1/workdrive/download/{id}
+            if ($method === 'GET' && preg_match('#^/v1/workdrive/download/(\w+)$#', $full, $m)) {
+                if ($this->downloadScopeMissing) {
+                    return Http::response(['ERROR_MESSAGE' => 'INVALID_OAUTHSCOPE', 'ERROR_CODE' => 401], 401);
+                }
+                $i = $this->items[$m[1]] ?? null;
+                return $i && !$i['folder'] ? Http::response(self::content($i['id'], $q['format'] ?? null)) : Http::response('', 404);
+            }
+
+            $path = substr($full, strlen('/workdrive/api/v1'));
 
             // GET /files/{id}/files — รายการในโฟลเดอร์ (แบ่งหน้าละ 50)
             if ($method === 'GET' && preg_match('#^/files/(\w+)/files$#', $path, $m)) {
-                parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $q);
                 $kids = array_values(array_filter($this->items, fn ($i) => $i['parent'] === $m[1] && $i['status'] === 1));
                 $page = array_slice($kids, (int) ($q['page']['offset'] ?? 0), (int) ($q['page']['limit'] ?? 50));
-                return Http::response(['data' => array_map(fn ($i) => ['id' => $i['id'], 'type' => 'files', 'attributes' => [
-                    'name' => $i['name'], 'is_folder' => $i['folder'], 'type' => $i['folder'] ? 'folder' : 'pdf',
-                ]], $page)]);
+                return Http::response(['data' => array_map(fn ($i) => ['id' => $i['id'], 'type' => 'files', 'attributes' => $this->attributes($i)], $page)]);
             }
 
             // GET /files/{id}
@@ -83,35 +94,10 @@ class FakeWorkDrive
                 if (!$i || $i['status'] !== 1) {
                     return Http::response(['errors' => [['id' => 'R008', 'title' => 'The resource does not exist']]], 404);
                 }
-                return Http::response(['data' => ['id' => $i['id'], 'type' => 'files', 'attributes' => [
-                    'name' => $i['name'], 'is_folder' => $i['folder'], 'type' => $i['folder'] ? 'folder' : 'pdf',
-                    'permalink' => "https://workdrive.zoho.com/" . ($i['folder'] ? 'folder' : 'file') . "/{$i['id']}",
-                    'parent_id' => $i['parent'] ?? null,
-                ]]]);
+                return Http::response(['data' => ['id' => $i['id'], 'type' => 'files', 'attributes' => $this->attributes($i)]]);
             }
 
-            // POST /permissions
-            if ($method === 'POST' && $path === '/permissions') {
-                $a = $body['data']['attributes'];
-                if (in_array($a['email_id'], $this->blockedEmails, true)) {
-                    return Http::response(['errors' => [['id' => 'R910', 'title' => 'External User Email share is not allowed']]], 401);
-                }
-                $id = 'perm' . ++$this->seq;
-                $this->permissions[$id] = ['resource_id' => $a['resource_id'], 'email' => $a['email_id'],
-                    'role_id' => (string) $a['role_id'], 'notify' => $a['send_notification_mail']];
-                return Http::response(['data' => ['id' => $id, 'type' => 'permissions', 'attributes' => $a + ['permissionid' => $id]]]);
-            }
-
-            // DELETE /permissions/{id}
-            if ($method === 'DELETE' && preg_match('#^/permissions/(\w+)$#', $path, $m)) {
-                if (!isset($this->permissions[$m[1]])) {
-                    return Http::response(['errors' => [['id' => 'R008', 'title' => 'The resource does not exist']]], 404);
-                }
-                unset($this->permissions[$m[1]]);
-                return Http::response(null, 200);
-            }
-
-            return Http::response(['errors' => [['title' => "ไม่รองรับ {$method} {$path}"]]], 400);
+            return Http::response(['errors' => [['title' => "ไม่รองรับ {$method} {$full}"]]], 400);
         });
     }
 }

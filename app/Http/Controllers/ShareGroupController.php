@@ -2,34 +2,31 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\ApplyShareGroup;
 use App\Jobs\RefreshCompanies;
-use App\Jobs\SendShareSummary;
 use App\Models\ShareGroup;
 use App\Models\SharePick;
-use App\Models\ShareRecipient;
 use App\Models\WdCompany;
 use App\Services\WorkDrive\PickImporter;
+use App\Services\WorkDrive\ShareBrowser;
 use App\Services\WorkDrive\WorkDriveClient;
-use Throwable;
 use Illuminate\Http\Request;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Illuminate\Support\Facades\Cache;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Throwable;
 
+/** ฝั่งพนักงาน: เลือกลูกค้า, pick รายการ, ตั้งค่าลิงก์ลูกค้า (อ่าน WorkDrive อย่างเดียว) */
 class ShareGroupController extends Controller
 {
     public function index()
     {
-        $groups = ShareGroup::withCount(['picks', 'recipients', 'grants' => fn ($q) => $q->where('status', 'granted')])
-            ->orderBy('name')->get();
-
+        $groups = ShareGroup::withCount('picks')->orderBy('name')->get();
         $companies = WdCompany::orderBy('name')->pluck('name');
         $companiesRefreshedAt = Cache::get('wd-companies-refreshed-at');
 
         return view('workdrive.index', compact('groups', 'companies', 'companiesRefreshedAt'));
     }
 
-    /** สร้างกลุ่มแชร์จากโฟลเดอร์บริษัทใต้ Accounts — ไม่สร้างอะไรใน WorkDrive */
+    /** สร้างลิงก์ลูกค้าจากโฟลเดอร์ลูกค้าใต้ Accounts — ไม่สร้างอะไรใน WorkDrive */
     public function store(Request $request, WorkDriveClient $wd)
     {
         $data = $request->validate([
@@ -40,7 +37,7 @@ class ShareGroupController extends Controller
         $input = trim($data['company']);
         $company = WdCompany::where('name', $input)->first();
 
-        // บริษัทใหม่ที่ยังไม่อยู่ในรายชื่อ: วางลิงก์โฟลเดอร์บริษัทได้เลย (อ่านจาก Zoho ทันที 1 ครั้ง)
+        // ลูกค้าใหม่ที่ยังไม่อยู่ในรายชื่อ: วางลิงก์โฟลเดอร์ลูกค้าได้เลย (อ่านจาก Zoho ทันที 1 ครั้ง)
         if (!$company && (str_contains($input, 'workdrive.zoho') || preg_match('/^[a-z0-9]{25,}$/', $input))) {
             try {
                 $item = $wd->info(WorkDriveClient::extractId($input));
@@ -48,70 +45,136 @@ class ShareGroupController extends Controller
                 return back()->withInput()->with('error', 'อ่านโฟลเดอร์จากลิงก์ไม่ได้: ' . $e->getMessage());
             }
             if (!WorkDriveClient::isFolder($item) || ($item['attributes']['parent_id'] ?? null) !== config('workdrive.company_root_id')) {
-                return back()->withInput()->with('error', 'ลิงก์นี้ไม่ใช่โฟลเดอร์บริษัทที่อยู่ใต้ Accounts');
+                return back()->withInput()->with('error', 'ลิงก์นี้ไม่ใช่โฟลเดอร์ลูกค้าที่อยู่ใต้ Accounts');
             }
             $company = WdCompany::updateOrCreate(['folder_id' => $item['id']], ['name' => trim($item['attributes']['name'])]);
         }
 
         if (!$company) {
-            return back()->withInput()->with('error', "ไม่พบบริษัท \"{$data['company']}\" ในรายชื่อ — เลือกจากรายการ หรือกดรีเฟรชรายชื่อบริษัท");
+            return back()->withInput()->with('error', "ไม่พบลูกค้า \"{$data['company']}\" ในรายชื่อ — เลือกจากรายการ หรือกดรีเฟรชรายชื่อ");
         }
 
         $name = trim($data['name'] ?? '') ?: $company->name;
         if (ShareGroup::where('name', $name)->exists()) {
-            return back()->withInput()->with('error', "มีกลุ่มชื่อ \"{$name}\" อยู่แล้ว — ตั้งชื่อกลุ่มใหม่ เช่น เพิ่มชื่อลูกค้าต่อท้าย");
+            return back()->withInput()->with('error', "มีลิงก์ชื่อ \"{$name}\" อยู่แล้ว — ตั้งชื่อใหม่ เช่น เพิ่มวันที่ต่อท้าย");
         }
 
         $group = ShareGroup::create(['name' => $name, 'company_folder_id' => $company->folder_id, 'company_name' => $company->name]);
 
-        return redirect()->route('workdrive.show', $group)->with('ok', 'สร้างกลุ่มแชร์แล้ว — วางชื่อโฟลเดอร์และเพิ่มอีเมลผู้รับได้เลย');
+        return redirect()->route('workdrive.show', $group)->with('ok', 'สร้างแล้ว — ติ๊กเลือกรายการจากโฟลเดอร์ลูกค้าได้เลย');
     }
 
     public function refreshCompanies()
     {
         RefreshCompanies::dispatch();
 
-        return back()->with('ok', 'เข้าคิวอ่านรายชื่อบริษัทแล้ว ใช้เวลาประมาณ 5 นาที');
+        return back()->with('ok', 'เข้าคิวอ่านรายชื่อลูกค้าแล้ว ใช้เวลาประมาณ 5 นาที');
     }
 
-    public function show(ShareGroup $group)
+    public function show(Request $request, ShareGroup $group, ShareBrowser $browser)
     {
         $picksByCategory = $group->picks()->get()->groupBy('category');
-        $recipients = $group->recipients()->get();
-        $grants = $group->grants()->get();
-        $runs = $group->runs()->limit(5)->get();
-
-        // สถานะต่อรายการ / ต่ออีเมล
-        $grantedByResource = $grants->where('status', 'granted')->countBy('resource_id');
-        $grantedByEmail = $grants->where('status', 'granted')->countBy('email');
-        $errorGrants = $grants->where('status', 'error');
-        $pending = $this->pendingCount($group, $grants);
+        $pickedIds = $group->picks()->pluck('source_id')->flip();
         $companies = WdCompany::orderBy('name')->pluck('name');
         $publicUrl = $group->publicUrl();
+        $logs = $group->accessLogs()->limit(30)->get();
+
+        // ติ๊กเลือกจากโฟลเดอร์ลูกค้า (ดึงสดจาก WorkDrive) — เข้าโฟลเดอร์ย่อยได้ด้วย ?browse=
+        $browseId = $request->query('browse', $group->company_folder_id);
+        $browseItems = [];
+        $browseError = null;
+        if ($browseId) {
+            try {
+                $browseItems = $browser->listing($browseId);
+            } catch (Throwable $e) {
+                $browseError = $e->getMessage();
+            }
+        }
+        $browseName = $browseId && $browseId !== $group->company_folder_id
+            ? rescue(fn () => $browser->info($browseId)['name'], $browseId, false) : null;
 
         return view('workdrive.show', compact(
-            'group', 'picksByCategory', 'recipients', 'runs', 'grantedByResource', 'grantedByEmail', 'errorGrants', 'pending', 'companies', 'publicUrl'
+            'group', 'picksByCategory', 'pickedIds', 'companies', 'publicUrl', 'logs',
+            'browseId', 'browseItems', 'browseError', 'browseName'
         ));
     }
 
-    /** ลบกลุ่ม: ถอนสิทธิ์ทั้งหมดก่อน แล้วค่อยลบ (ทำในคิว) */
+    /** ลบออกจากระบบ (ลิงก์ลูกค้าใช้ไม่ได้ทันที) — ไม่แตะอะไรใน WorkDrive */
     public function destroy(ShareGroup $group)
     {
-        $group->picks()->delete();
-        $group->recipients()->delete();
-        ApplyShareGroup::dispatch($group, 'delete', false, true);
+        $group->grants()->delete(); // ข้อมูลจากระบบแชร์สิทธิ์เดิม (ไม่ใช้แล้ว)
+        $group->delete();
 
-        return redirect()->route('workdrive.index')->with('ok', "กำลังถอนสิทธิ์ทั้งหมดของ \"{$group->name}\" แล้วจะลบกลุ่มเมื่อเสร็จ");
+        return redirect()->route('workdrive.index')->with('ok', "ลบ \"{$group->name}\" แล้ว ลิงก์ลูกค้าใช้ไม่ได้แล้ว");
     }
 
     public function history(ShareGroup $group)
     {
-        $runs = $group->runs()->paginate(30);
+        $logs = $group->accessLogs()->paginate(50);
 
-        return view('workdrive.history', compact('group', 'runs'));
+        return view('workdrive.history', compact('group', 'logs'));
+    }
+
+    // ------------------------------------------------------------ ลิงก์ลูกค้า
+    public function updateLink(Request $request, ShareGroup $group)
+    {
+        $data = $request->validate([
+            'password' => 'nullable|string|min:4|max:100',
+            'clear_password' => 'nullable|boolean',
+            'expires_at' => 'nullable|date',
+            'enabled' => 'nullable|boolean',
+        ]);
+
+        $update = [
+            'link_enabled' => $request->boolean('enabled'),
+            'link_expires_at' => !empty($data['expires_at']) ? \Illuminate\Support\Carbon::parse($data['expires_at'])->endOfDay() : null,
+        ];
+        if ($request->boolean('clear_password')) {
+            $update['link_password'] = null;
+        } elseif (!empty($data['password'])) {
+            $update['link_password'] = $data['password']; // cast 'hashed' เข้ารหัสให้
+        }
+        $group->update($update);
+
+        return back()->with('ok', 'บันทึกการตั้งค่าลิงก์แล้ว');
+    }
+
+    /** สร้างลิงก์ใหม่ — ลิงก์เก่าใช้ไม่ได้ทันที */
+    public function regeneratePublicLink(ShareGroup $group)
+    {
+        $group->regeneratePublicToken();
+
+        return back()->with('ok', 'สร้างลิงก์ใหม่แล้ว ลิงก์เดิมใช้ไม่ได้แล้ว');
     }
 
     // ------------------------------------------------------------ รายการที่ pick
+    /** ติ๊กเลือกจากรายการในโฟลเดอร์ลูกค้า */
+    public function selectPicks(Request $request, ShareGroup $group, ShareBrowser $browser)
+    {
+        $data = $request->validate([
+            'browse' => 'required|string|max:64',
+            'ids' => 'required|array|max:500',
+            'ids.*' => 'string|max:64',
+            'category' => 'nullable|string|max:200',
+        ]);
+
+        // ใช้ข้อมูลจากรายการในโฟลเดอร์นั้นเท่านั้น (กันการส่ง id อื่นเข้ามา)
+        $listing = collect($browser->listing($data['browse']))->keyBy('id');
+        $added = 0;
+        foreach ($data['ids'] as $id) {
+            if (!$item = $listing->get($id)) {
+                continue;
+            }
+            $pick = SharePick::firstOrCreate(
+                ['share_group_id' => $group->id, 'category' => trim($data['category'] ?? ''), 'source_id' => $id],
+                ['source' => $item['name'], 'source_name' => $item['name'], 'source_type' => $item['is_folder'] ? 'folder' : 'file', 'status' => 'ok']
+            );
+            $added += $pick->wasRecentlyCreated ? 1 : 0;
+        }
+
+        return back()->with('ok', "เพิ่ม {$added} รายการ");
+    }
+
     public function import(Request $request, ShareGroup $group, PickImporter $importer)
     {
         $request->validate([
@@ -122,13 +185,12 @@ class ShareGroupController extends Controller
 
         $company = $this->pickCompany($group, $request->input('company'));
         if (!$company) {
-            return back()->withInput()->with('error', 'เลือกบริษัทจากรายการก่อน');
+            return back()->withInput()->with('error', 'เลือกลูกค้าจากรายการก่อน');
         }
 
         $r = $importer->import($group, $request->file('file')->getRealPath(), $request->boolean('replace'), $company->folder_id);
 
-        return back()->with('ok', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']} รายการ — กด \"แชร์ / อัปเดตสิทธิ์\" เพื่อให้มีผล")
-            ->with('invalid', $r['invalid']);
+        return back()->with('ok', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']} รายการ")->with('invalid', $r['invalid']);
     }
 
     public function template()
@@ -138,24 +200,24 @@ class ShareGroupController extends Controller
         return response()->streamDownload(fn () => $writer->save('php://output'), 'workdrive-picks-template.xlsx');
     }
 
-    /** เลือกบริษัท แล้ววางชื่อโฟลเดอร์ได้หลายบรรทัด */
+    /** วางชื่อโฟลเดอร์ได้หลายบรรทัด */
     public function addPick(Request $request, ShareGroup $group, PickImporter $importer)
     {
         $data = $request->validate([
             'company' => 'required|string|max:255',
-            'category' => 'required|string|max:200',
+            'category' => 'nullable|string|max:200',
             'sources' => 'required|string|max:50000',
         ]);
 
         $company = $this->pickCompany($group, $data['company']);
         if (!$company) {
-            return back()->withInput()->with('error', "ไม่พบบริษัท \"{$data['company']}\" — เลือกจากรายการ");
+            return back()->withInput()->with('error', "ไม่พบลูกค้า \"{$data['company']}\" — เลือกจากรายการ");
         }
 
-        $r = $importer->importText($group, $data['category'], $data['sources'], $company->folder_id);
+        $r = $importer->importText($group, $data['category'] ?? '', $data['sources'], $company->folder_id);
 
         return back()->withInput($r['invalid'] ? $request->only('category') : [])
-            ->with($r['added'] || $r['skipped'] ? 'ok' : 'error', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']}, ไม่พบ " . count($r['invalid']) . ' — กด "แชร์ / อัปเดตสิทธิ์" เพื่อให้มีผล')
+            ->with($r['added'] || $r['skipped'] ? 'ok' : 'error', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']}, ไม่พบ " . count($r['invalid']))
             ->with('invalid', $r['invalid']);
     }
 
@@ -164,62 +226,10 @@ class ShareGroupController extends Controller
         abort_unless($pick->share_group_id === $group->id, 404);
         $pick->delete();
 
-        return back()->with('ok', 'เอารายการออกแล้ว — กด "แชร์ / อัปเดตสิทธิ์" เพื่อถอนสิทธิ์');
+        return back()->with('ok', 'เอารายการออกแล้ว ลูกค้าจะไม่เห็นรายการนี้ทันที');
     }
 
-    // ------------------------------------------------------------ ผู้รับ
-    /** เพิ่มอีเมลได้หลายรายการ คั่นด้วยขึ้นบรรทัดใหม่ , หรือ ; */
-    public function addRecipients(Request $request, ShareGroup $group)
-    {
-        $request->validate(['emails' => 'required|string|max:5000']);
-
-        $emails = collect(preg_split('/[\s,;]+/', strtolower($request->input('emails'))))->filter()->unique();
-        $invalid = $emails->reject(fn ($e) => filter_var($e, FILTER_VALIDATE_EMAIL));
-        if ($invalid->isNotEmpty()) {
-            return back()->withInput()->with('error', 'อีเมลไม่ถูกต้อง: ' . $invalid->implode(', '));
-        }
-
-        $added = 0;
-        foreach ($emails as $email) {
-            $added += ShareRecipient::firstOrCreate(['share_group_id' => $group->id, 'email' => $email])->wasRecentlyCreated ? 1 : 0;
-        }
-
-        return back()->with('ok', "เพิ่มผู้รับ {$added} คน — กด \"แชร์ / อัปเดตสิทธิ์\" เพื่อให้มีผล");
-    }
-
-    public function removeRecipient(ShareGroup $group, ShareRecipient $recipient)
-    {
-        abort_unless($recipient->share_group_id === $group->id, 404);
-        $recipient->delete();
-
-        return back()->with('ok', "เอา {$recipient->email} ออกแล้ว — กด \"แชร์ / อัปเดตสิทธิ์\" เพื่อถอนสิทธิ์");
-    }
-
-    // ------------------------------------------------------------ แชร์
-    public function apply(Request $request, ShareGroup $group)
-    {
-        ApplyShareGroup::dispatch($group, 'manual', $request->boolean('notify', true));
-
-        return back()->with('ok', 'เข้าคิวแล้ว ระบบจะให้/ถอนสิทธิ์ภายในไม่กี่นาที รีเฟรชหน้านี้เพื่อดูผล');
-    }
-
-    public function resendSummary(Request $request, ShareGroup $group)
-    {
-        $email = $request->input('email');
-        SendShareSummary::dispatch($group, $email ? [$email] : null);
-
-        return back()->with('ok', 'เข้าคิวส่งอีเมลสรุปแล้ว');
-    }
-
-    /** สร้างลิงก์หลักใหม่ — ลิงก์เก่าใช้ไม่ได้ทันที */
-    public function regeneratePublicLink(ShareGroup $group)
-    {
-        $group->regeneratePublicToken();
-
-        return back()->with('ok', 'สร้างลิงก์หลักใหม่แล้ว ลิงก์เดิมใช้ไม่ได้แล้ว');
-    }
-
-    /** หาบริษัทที่เลือก — ถ้ากลุ่มยังไม่ผูกบริษัท ให้ผูกกับบริษัทนี้ (ใช้เป็นค่าเริ่มต้นครั้งต่อไป) */
+    /** หาลูกค้าที่เลือก — ถ้ายังไม่ผูก ให้ผูกกับลูกค้านี้ */
     private function pickCompany(ShareGroup $group, ?string $name): ?WdCompany
     {
         $company = WdCompany::where('name', trim((string) $name))->first();
@@ -228,17 +238,5 @@ class ShareGroupController extends Controller
         }
 
         return $company;
-    }
-
-    /** จำนวนสิทธิ์ที่ยังต้องให้/ถอน (เพื่อเตือนให้กดแชร์) */
-    private function pendingCount(ShareGroup $group, $grants): int
-    {
-        $sourceIds = $group->picks()->distinct()->pluck('source_id');
-        $emails = $group->recipients()->pluck('email');
-        // ใช้ array ธรรมดา: diff() ของ Eloquent Collection จะเรียก getKey() กับข้อความแล้ว error
-        $desired = $sourceIds->crossJoin($emails)->map(fn ($p) => "{$p[0]}|{$p[1]}")->all();
-        $granted = $grants->where('status', 'granted')->map(fn ($g) => "{$g->resource_id}|{$g->email}")->toBase()->all();
-
-        return count(array_diff($desired, $granted)) + count(array_diff($granted, $desired));
     }
 }

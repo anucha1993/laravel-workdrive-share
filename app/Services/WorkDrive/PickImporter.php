@@ -71,8 +71,8 @@ class PickImporter
             if ($i === 0 || ($category === '' && $source === '')) {
                 continue; // แถวแรกเป็นหัวตาราง
             }
-            if ($category === '' || $source === '') {
-                $invalid[] = 'แถว ' . ($i + 1) . ': ต้องมีทั้งหมวดและชื่อ/ลิงก์';
+            if ($source === '') {
+                $invalid[] = 'แถว ' . ($i + 1) . ': ไม่มีชื่อโฟลเดอร์';
                 continue;
             }
             $rows[] = [$category, $source, 'แถว ' . ($i + 1)];
