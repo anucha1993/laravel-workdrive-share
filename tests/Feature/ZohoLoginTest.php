@@ -69,6 +69,16 @@ class ZohoLoginTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_token_error_from_zoho_is_shown(): void
+    {
+        Http::fake(['accounts.zoho.com/oauth/v2/token' => Http::response(['error' => 'invalid_client'])]);
+
+        $this->withSession(['zoho_oauth_states' => ['st']])
+            ->get('/auth/zoho/callback?code=c&state=st')
+            ->assertUnauthorized()
+            ->assertSee('invalid_client');
+    }
+
     public function test_login_started_in_two_tabs_accepts_the_older_state(): void
     {
         $this->fakeZoho('staff@thefirstgoodmangroup.com');

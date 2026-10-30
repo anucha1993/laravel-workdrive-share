@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -56,12 +57,12 @@ class ZohoAuthController extends Controller
         $match = array_filter($states, fn ($s) => hash_equals((string) $s, $given));
         if ($given === '' || !$match) {
             // code/state ใช้ได้ครั้งเดียว — ให้เริ่มใหม่แทนการขึ้น 403 เฉยๆ
-            return response()->view('workdrive.login-retry', [], 403);
+            return $this->fail('ลิงก์เข้าสู่ระบบนี้หมดอายุหรือถูกใช้ไปแล้ว (เกิดได้เมื่อรีเฟรชหน้า หรือเปิดหน้า Login หลายแท็บพร้อมกัน)', 403);
         }
         $request->session()->put('zoho_oauth_states', array_values(array_diff($states, $match)));
 
         if ($request->filled('error')) {
-            return redirect('/')->with('error', 'Zoho ปฏิเสธการเข้าสู่ระบบ: ' . $request->query('error'));
+            return $this->fail('Zoho ปฏิเสธการเข้าสู่ระบบ: ' . $request->query('error'), 403);
         }
 
         $accounts = $this->accounts($request->query('accounts-server'));
@@ -74,7 +75,14 @@ class ZohoAuthController extends Controller
             'code' => $request->query('code'),
         ])->json();
 
-        abort_if(empty($token['access_token']), 401, 'ขอ token จาก Zoho ไม่สำเร็จ');
+        if (empty($token['access_token'])) {
+            // Zoho ตอบ error เป็นรหัส เช่น invalid_client (Client ID/Secret ผิด), invalid_code (code หมดอายุ),
+            // invalid_redirect_uri — ไม่มีข้อมูลลับในนี้ แสดงและบันทึกได้
+            $code = $token['error'] ?? 'unknown';
+            Log::warning('Zoho login: แลก token ไม่สำเร็จ', ['error' => $code, 'accounts' => $accounts]);
+
+            return $this->fail("ขอ token จาก Zoho ไม่สำเร็จ ({$code})", 401);
+        }
 
         // id_token ได้มาจาก token endpoint ของ Zoho โดยตรงผ่าน HTTPS จึงอ่าน claim ได้เลย
         // ถ้าไม่มีอีเมลใน id_token ค่อยถาม userinfo endpoint
@@ -85,13 +93,18 @@ class ZohoAuthController extends Controller
         }
 
         $email = strtolower($info['email'] ?? '');
-        abort_if($email === '', 401, 'ไม่ได้รับอีเมลจาก Zoho');
-        abort_if(($info['email_verified'] ?? true) === false, 403, 'อีเมลนี้ยังไม่ได้ยืนยันกับ Zoho');
+        if ($email === '') {
+            Log::warning('Zoho login: ไม่ได้รับอีเมล', ['claims' => array_keys($info)]);
+            return $this->fail('ไม่ได้รับอีเมลจาก Zoho', 401);
+        }
+        if (($info['email_verified'] ?? true) === false) {
+            return $this->fail('อีเมลนี้ยังไม่ได้ยืนยันกับ Zoho', 403);
+        }
 
         // อนุญาตเฉพาะโดเมนขององค์กร
         $allowed = array_filter(array_map('trim', explode(',', (string) config('workdrive.login.allowed_domains'))));
         if ($allowed && !in_array(Str::after($email, '@'), $allowed, true)) {
-            abort(403, "บัญชี {$email} ไม่มีสิทธิ์เข้าระบบนี้");
+            return $this->fail("บัญชี {$email} ไม่มีสิทธิ์เข้าระบบนี้ (รับเฉพาะ " . implode(', ', $allowed) . ')', 403);
         }
 
         $user = User::firstOrCreate(
@@ -103,6 +116,12 @@ class ZohoAuthController extends Controller
         $request->session()->regenerate();
 
         return redirect()->intended(route('workdrive.index'));
+    }
+
+    /** หน้าแจ้งปัญหาพร้อมปุ่มลองใหม่ (production ซ่อนข้อความของ abort() จึงใช้หน้านี้แทน) */
+    private function fail(string $message, int $status)
+    {
+        return response()->view('workdrive.login-retry', ['message' => $message], $status);
     }
 
     private static function jwtClaims(string $jwt): array
