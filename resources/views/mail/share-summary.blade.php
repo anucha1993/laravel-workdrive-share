@@ -5,6 +5,9 @@
   <div style="max-width:640px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px">
     <p style="margin-top:0">เรียน ผู้รับเอกสาร</p>
     <p>{{ config('app.name') }} ได้แชร์เอกสารชุด <b>{{ $group->name }}</b> ให้คุณผ่าน Zoho WorkDrive (สิทธิ์ดูอย่างเดียว) ตามรายการด้านล่าง</p>
+    <p style="margin:16px 0">
+      <a href="{{ $group->publicUrl() }}" style="display:inline-block;background:#047857;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">เปิดรายการเอกสารทั้งหมด</a>
+    </p>
 
     @foreach ($items as $category => $picks)
       <h3 style="margin:20px 0 6px;font-size:15px;color:#047857">📁 {{ $category }}</h3>

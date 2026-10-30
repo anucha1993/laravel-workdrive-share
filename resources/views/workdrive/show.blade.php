@@ -19,6 +19,24 @@
   </form>
 </div>
 
+{{-- ลิงก์หลัก: หน้าสารบัญรวมทุกรายการที่แชร์แล้ว ส่งให้ลูกค้าลิงก์เดียว --}}
+<div class="card !py-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="text-sm font-semibold">🔗 ลิงก์หลักสำหรับส่งลูกค้า</span>
+    <span class="muted">· แสดงเฉพาะรายการที่แชร์สิทธิ์แล้ว แยกตามหมวด</span>
+  </div>
+  <div class="mt-2 flex flex-col gap-2 sm:flex-row">
+    <input id="public-link" type="text" class="input font-mono !text-xs" value="{{ $publicUrl }}" readonly onfocus="this.select()">
+    <div class="flex shrink-0 gap-2">
+      <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('public-link').value).then(() => { this.textContent = 'คัดลอกแล้ว ✓'; setTimeout(() => this.textContent = 'Copy', 1500) })">Copy</button>
+      <a class="btn-light" href="{{ $publicUrl }}" target="_blank" rel="noopener">เปิดดู ↗</a>
+      <form method="post" action="{{ route('workdrive.public-link', $group) }}" onsubmit="return confirm('สร้างลิงก์ใหม่? ลิงก์เดิมที่ส่งให้ลูกค้าไปแล้วจะใช้ไม่ได้')">
+        @csrf <button class="btn-light" title="ลิงก์เดิมจะใช้ไม่ได้">สร้างใหม่</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 @if ($pending)
   <div class="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">มีสิทธิ์ที่ยังไม่ได้อัปเดต {{ $pending }} รายการ — กด "แชร์ / อัปเดตสิทธิ์"</div>
 @endif

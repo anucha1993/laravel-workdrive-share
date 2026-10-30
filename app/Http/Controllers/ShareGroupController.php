@@ -87,9 +87,10 @@ class ShareGroupController extends Controller
         $errorGrants = $grants->where('status', 'error');
         $pending = $this->pendingCount($group, $grants);
         $companies = WdCompany::orderBy('name')->pluck('name');
+        $publicUrl = $group->publicUrl();
 
         return view('workdrive.show', compact(
-            'group', 'picksByCategory', 'recipients', 'runs', 'grantedByResource', 'grantedByEmail', 'errorGrants', 'pending', 'companies'
+            'group', 'picksByCategory', 'recipients', 'runs', 'grantedByResource', 'grantedByEmail', 'errorGrants', 'pending', 'companies', 'publicUrl'
         ));
     }
 
@@ -208,6 +209,14 @@ class ShareGroupController extends Controller
         SendShareSummary::dispatch($group, $email ? [$email] : null);
 
         return back()->with('ok', 'เข้าคิวส่งอีเมลสรุปแล้ว');
+    }
+
+    /** สร้างลิงก์หลักใหม่ — ลิงก์เก่าใช้ไม่ได้ทันที */
+    public function regeneratePublicLink(ShareGroup $group)
+    {
+        $group->regeneratePublicToken();
+
+        return back()->with('ok', 'สร้างลิงก์หลักใหม่แล้ว ลิงก์เดิมใช้ไม่ได้แล้ว');
     }
 
     /** หาบริษัทที่เลือก — ถ้ากลุ่มยังไม่ผูกบริษัท ให้ผูกกับบริษัทนี้ (ใช้เป็นค่าเริ่มต้นครั้งต่อไป) */

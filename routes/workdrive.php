@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PublicShareController;
 use App\Http\Controllers\ShareGroupController as C;
 use App\Http\Controllers\ZohoAuthController;
 use App\Http\Middleware\BreakOutOfIframe;
@@ -13,6 +14,9 @@ Route::middleware(['web', BreakOutOfIframe::class])->group(function () {
     Route::get('/auth/zoho/callback', [ZohoAuthController::class, 'callback'])->name('auth.zoho.callback');
     Route::post('/logout', [ZohoAuthController::class, 'logout'])->name('logout');
 });
+
+// ลิงก์หลักสำหรับลูกค้า (หน้าสารบัญ ไม่ต้อง Login)
+Route::middleware(['web', 'throttle:60,1'])->get('/s/{token}', [PublicShareController::class, 'show'])->name('public.share');
 
 Route::middleware(['web', BreakOutOfIframe::class, 'auth'])->prefix('workdrive')->name('workdrive.')->group(function () {
     Route::get('/', [C::class, 'index'])->name('index');
@@ -29,4 +33,5 @@ Route::middleware(['web', BreakOutOfIframe::class, 'auth'])->prefix('workdrive')
     Route::delete('/{group}/recipients/{recipient}', [C::class, 'removeRecipient'])->name('recipients.remove');
     Route::post('/{group}/apply', [C::class, 'apply'])->name('apply');
     Route::post('/{group}/summary', [C::class, 'resendSummary'])->name('summary');
+    Route::post('/{group}/public-link', [C::class, 'regeneratePublicLink'])->name('public-link');
 });
