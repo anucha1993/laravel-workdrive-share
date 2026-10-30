@@ -86,9 +86,10 @@ class ShareGroupController extends Controller
         $grantedByEmail = $grants->where('status', 'granted')->countBy('email');
         $errorGrants = $grants->where('status', 'error');
         $pending = $this->pendingCount($group, $grants);
+        $companies = WdCompany::orderBy('name')->pluck('name');
 
         return view('workdrive.show', compact(
-            'group', 'picksByCategory', 'recipients', 'runs', 'grantedByResource', 'grantedByEmail', 'errorGrants', 'pending'
+            'group', 'picksByCategory', 'recipients', 'runs', 'grantedByResource', 'grantedByEmail', 'errorGrants', 'pending', 'companies'
         ));
     }
 
@@ -113,11 +114,17 @@ class ShareGroupController extends Controller
     public function import(Request $request, ShareGroup $group, PickImporter $importer)
     {
         $request->validate([
+            'company' => 'required|string|max:255',
             'file' => 'required|file|mimes:xlsx,xls,csv|max:10240',
             'replace' => 'nullable|boolean',
         ]);
 
-        $r = $importer->import($group, $request->file('file')->getRealPath(), $request->boolean('replace'));
+        $company = $this->pickCompany($group, $request->input('company'));
+        if (!$company) {
+            return back()->withInput()->with('error', 'เลือกบริษัทจากรายการก่อน');
+        }
+
+        $r = $importer->import($group, $request->file('file')->getRealPath(), $request->boolean('replace'), $company->folder_id);
 
         return back()->with('ok', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']} รายการ — กด \"แชร์ / อัปเดตสิทธิ์\" เพื่อให้มีผล")
             ->with('invalid', $r['invalid']);
@@ -130,12 +137,21 @@ class ShareGroupController extends Controller
         return response()->streamDownload(fn () => $writer->save('php://output'), 'workdrive-picks-template.xlsx');
     }
 
-    /** วางชื่อโฟลเดอร์ / path / ลิงก์ ได้หลายบรรทัด */
+    /** เลือกบริษัท แล้ววางชื่อโฟลเดอร์ได้หลายบรรทัด */
     public function addPick(Request $request, ShareGroup $group, PickImporter $importer)
     {
-        $data = $request->validate(['category' => 'required|string|max:200', 'sources' => 'required|string|max:50000']);
+        $data = $request->validate([
+            'company' => 'required|string|max:255',
+            'category' => 'required|string|max:200',
+            'sources' => 'required|string|max:50000',
+        ]);
 
-        $r = $importer->importText($group, $data['category'], $data['sources']);
+        $company = $this->pickCompany($group, $data['company']);
+        if (!$company) {
+            return back()->withInput()->with('error', "ไม่พบบริษัท \"{$data['company']}\" — เลือกจากรายการ");
+        }
+
+        $r = $importer->importText($group, $data['category'], $data['sources'], $company->folder_id);
 
         return back()->withInput($r['invalid'] ? $request->only('category') : [])
             ->with($r['added'] || $r['skipped'] ? 'ok' : 'error', "เพิ่ม {$r['added']} รายการ, ซ้ำ {$r['skipped']}, ไม่พบ " . count($r['invalid']) . ' — กด "แชร์ / อัปเดตสิทธิ์" เพื่อให้มีผล')
@@ -192,6 +208,17 @@ class ShareGroupController extends Controller
         SendShareSummary::dispatch($group, $email ? [$email] : null);
 
         return back()->with('ok', 'เข้าคิวส่งอีเมลสรุปแล้ว');
+    }
+
+    /** หาบริษัทที่เลือก — ถ้ากลุ่มยังไม่ผูกบริษัท ให้ผูกกับบริษัทนี้ (ใช้เป็นค่าเริ่มต้นครั้งต่อไป) */
+    private function pickCompany(ShareGroup $group, ?string $name): ?WdCompany
+    {
+        $company = WdCompany::where('name', trim((string) $name))->first();
+        if ($company && !$group->company_folder_id) {
+            $group->update(['company_folder_id' => $company->folder_id, 'company_name' => $company->name]);
+        }
+
+        return $company;
     }
 
     /** จำนวนสิทธิ์ที่ยังต้องให้/ถอน (เพื่อเตือนให้กดแชร์) */

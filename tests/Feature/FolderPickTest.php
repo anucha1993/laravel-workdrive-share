@@ -96,44 +96,57 @@ class FolderPickTest extends TestCase
         $this->assertSame(0, ShareGroup::count());
     }
 
-    public function test_paste_many_folder_names(): void
+    private const TFG = 'บริษัทนำคนต่างด้าวมาทำงานในประเทศ เดอะ เฟิร์ส กูด แมน กรุ๊ป จำกัด';
+
+    public function test_choose_company_and_paste_folder_names(): void
     {
         $group = $this->group();
 
         $this->actingAs($this->user)->post("/workdrive/{$group->id}/picks", [
+            'company' => self::TFG,
             'category' => 'เอกสารแรงงาน',
-            'sources' => "MJ465023\r\n mj465024 \n\nMJ999999\nMJ465023\\สัญญาจ้าง.pdf\n\\บริษัท รอยัล ปอร์ซเลน จำกัด (มหาชน)\\MJ470001",
+            'sources' => "MJ465023\r\n mj465024 \n\nMJ999999",
         ])->assertSessionHas('invalid', fn ($inv) => count($inv) === 1 && str_contains($inv[0], 'MJ999999'));
 
-        $this->assertEqualsCanonicalizing(
-            [$this->mj1, $this->mj2, $this->contract, $this->otherMj],
-            $group->picks()->pluck('source_id')->all()
-        );
+        $this->assertEqualsCanonicalizing([$this->mj1, $this->mj2], $group->picks()->pluck('source_id')->all());
         $this->assertSame('MJ465023', $group->picks()->where('source_id', $this->mj1)->value('source_name'));
         $this->assertSame([], $this->wd->writes());
     }
 
-    public function test_full_path_works_without_company(): void
-    {
-        $group = ShareGroup::create(['name' => 'ไม่ผูกบริษัท']);
-
-        $this->actingAs($this->user)->post("/workdrive/{$group->id}/picks", [
-            'category' => 'ก',
-            'sources' => "\\บริษัทนำคนต่างด้าวมาทำงานในประเทศ เดอะ เฟิร์ส กูด แมน กรุ๊ป จำกัด\\MJ465023\nMJ465024",
-        ])->assertSessionHas('invalid', fn ($inv) => count($inv) === 1 && str_contains($inv[0], 'MJ465024'));
-
-        $this->assertSame([$this->mj1], $group->picks()->pluck('source_id')->all());
-    }
-
-    public function test_links_still_work(): void
+    public function test_choose_other_company_in_same_group(): void
     {
         $group = $this->group();
 
         $this->actingAs($this->user)->post("/workdrive/{$group->id}/picks", [
+            'company' => 'บริษัท รอยัล ปอร์ซเลน จำกัด (มหาชน)',
             'category' => 'ก',
-            'sources' => "https://workdrive.zoho.com/home/xx/folders/{$this->otherMj}",
-        ]);
+            'sources' => "MJ470001\nMJ465023",
+        ])->assertSessionHas('invalid', fn ($inv) => count($inv) === 1 && str_contains($inv[0], 'MJ465023'));
 
         $this->assertSame([$this->otherMj], $group->picks()->pluck('source_id')->all());
+        $this->assertSame($this->tfg, $group->fresh()->company_folder_id, 'บริษัทหลักของกลุ่มไม่เปลี่ยน');
+    }
+
+    public function test_group_without_company_gets_the_first_chosen_company(): void
+    {
+        $group = ShareGroup::create(['name' => 'ไม่ผูกบริษัท']);
+
+        $this->actingAs($this->user)->post("/workdrive/{$group->id}/picks", [
+            'company' => self::TFG, 'category' => 'ก', 'sources' => 'MJ465023',
+        ]);
+
+        $this->assertSame([$this->mj1], $group->picks()->pluck('source_id')->all());
+        $this->assertSame($this->tfg, $group->fresh()->company_folder_id);
+    }
+
+    public function test_company_must_be_chosen_from_list(): void
+    {
+        $group = $this->group();
+
+        $this->actingAs($this->user)->post("/workdrive/{$group->id}/picks", [
+            'company' => 'พิมพ์ไม่ครบ', 'category' => 'ก', 'sources' => 'MJ465023',
+        ])->assertSessionHas('error');
+
+        $this->assertSame(0, $group->picks()->count());
     }
 }

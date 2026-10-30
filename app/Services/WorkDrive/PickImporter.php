@@ -22,13 +22,14 @@ class PickImporter
      * @param array<int, array{0:string,1:string,2:string}> $rows [หมวด, ข้อความ, ป้ายบอกตำแหน่ง]
      * @return array{added:int,skipped:int,invalid:array<int,string>}
      */
-    public function addRows(ShareGroup $group, array $rows): array
+    public function addRows(ShareGroup $group, array $rows, ?string $companyFolderId = null): array
     {
         $result = ['added' => 0, 'skipped' => 0, 'invalid' => []];
+        $companyFolderId ??= $group->company_folder_id;
 
         foreach ($rows as [$category, $source, $label]) {
             try {
-                $found = $this->resolver->resolve($source, $group->company_folder_id);
+                $found = $this->resolver->resolve($source, $companyFolderId);
             } catch (Throwable $e) {
                 $result['invalid'][] = "{$label}: {$source} — {$e->getMessage()}";
                 continue;
@@ -45,14 +46,14 @@ class PickImporter
     }
 
     /** ข้อความหลายบรรทัด (บรรทัดละ 1 รายการ) ภายใต้หมวดเดียว */
-    public function importText(ShareGroup $group, string $category, string $text): array
+    public function importText(ShareGroup $group, string $category, string $text, ?string $companyFolderId = null): array
     {
         $lines = array_values(array_filter(array_map('trim', preg_split('/\R/', $text)), 'strlen'));
 
-        return $this->addRows($group, array_map(fn ($l, $i) => [trim($category), $l, 'บรรทัด ' . ($i + 1)], $lines, array_keys($lines)));
+        return $this->addRows($group, array_map(fn ($l, $i) => [trim($category), $l, 'บรรทัด ' . ($i + 1)], $lines, array_keys($lines)), $companyFolderId);
     }
 
-    public function import(ShareGroup $group, string $path, bool $replace = false): array
+    public function import(ShareGroup $group, string $path, bool $replace = false, ?string $companyFolderId = null): array
     {
         $sheet = IOFactory::load($path)->getActiveSheet()->toArray(null, true, true, false);
         $rows = [];
@@ -75,7 +76,7 @@ class PickImporter
             $group->picks()->delete();
         }
 
-        $result = $this->addRows($group, $rows);
+        $result = $this->addRows($group, $rows, $companyFolderId);
         $result['invalid'] = array_merge($invalid, $result['invalid']);
 
         return $result;
