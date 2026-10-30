@@ -20,6 +20,6 @@ class SharePick extends Model
     /** ลิงก์เปิดไฟล์ใน WorkDrive (ใช้ permalink จาก API ถ้ามี) */
     public function url(): string
     {
-        return $this->permalink ?: 'https://workdrive.zoho.' . config('workdrive.dc') . "/{$this->source_type}/{$this->source_id}";
+        return $this->permalink ?: 'https://workdrive.zoho.' . config('workdrive.dc') . '/' . ($this->source_type ?: 'folder') . "/{$this->source_id}";
     }
 }

@@ -139,6 +139,26 @@ class FolderPickTest extends TestCase
         $this->assertSame($this->tfg, $group->fresh()->company_folder_id);
     }
 
+    public function test_added_items_have_working_links_before_sharing(): void
+    {
+        $group = $this->group();
+
+        $this->actingAs($this->user)->post("/workdrive/{$group->id}/picks", [
+            'company' => self::TFG, 'category' => 'ก',
+            'sources' => "MJ465023\nMJ465023\\สัญญาจ้าง.pdf\nhttps://workdrive.zoho.com/home/x/folders/{$this->otherMj}",
+        ]);
+
+        $urls = $group->picks()->get()->mapWithKeys(fn ($p) => [$p->source_id => $p->url()]);
+        $this->assertSame("https://workdrive.zoho.com/folder/{$this->mj1}", $urls[$this->mj1]);
+        $this->assertSame("https://workdrive.zoho.com/file/{$this->contract}", $urls[$this->contract]);
+        $this->assertSame("https://workdrive.zoho.com/folder/{$this->otherMj}", $urls[$this->otherMj]);
+        $this->assertSame('MJ470001', $group->picks()->where('source_id', $this->otherMj)->value('source_name'));
+
+        $this->withoutVite()->actingAs($this->user)->get("/workdrive/{$group->id}")
+            ->assertSee("https://workdrive.zoho.com/folder/{$this->mj1}", false)
+            ->assertSee('เปิด ↗');
+    }
+
     public function test_company_must_be_chosen_from_list(): void
     {
         $group = $this->group();

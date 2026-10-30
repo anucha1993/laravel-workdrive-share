@@ -79,6 +79,15 @@
         <textarea name="sources" rows="8" class="input font-mono" required placeholder="MJ465023&#10;MJ465024&#10;MJ465031">{{ old('sources') }}</textarea>
         <button class="btn">เพิ่ม</button>
       </form>
+      {{-- แสดงผลตรงนี้ด้วย เพราะข้อความด้านบนสุดของหน้ามักถูกเลื่อนพ้นจอ --}}
+      @if (session('ok') || session('error'))
+        <div class="mt-3 rounded-lg px-3 py-2 text-sm {{ session('error') ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800' }}">{{ session('error') ?? session('ok') }}</div>
+      @endif
+      @if (session('invalid'))
+        <ul class="mt-2 list-disc rounded-lg bg-amber-50 py-2 pr-3 pl-7 text-xs text-amber-800">
+          @foreach (session('invalid') as $line)<li>{{ $line }}</li>@endforeach
+        </ul>
+      @endif
     </div>
 
     <div class="border-t border-slate-100 pt-4">
@@ -112,8 +121,9 @@
         <div class="flex flex-col gap-2 p-3 sm:flex-row sm:items-start">
           <div class="min-w-0 flex-1">
             <div class="text-sm font-medium">
-              @if ($p->source_name) <a href="{{ $p->url() }}" target="_blank" rel="noopener" class="hover:underline">{{ $p->source_name }}</a> @else (ยังไม่ได้อ่านข้อมูล) @endif
+              <a href="{{ $p->url() }}" target="_blank" rel="noopener" class="text-emerald-800 hover:underline">{{ $p->source_name ?? $p->source_id }}</a>
               @if ($p->source_type === 'folder') <span class="badge bg-slate-100 text-slate-600">โฟลเดอร์</span> @endif
+              <a href="{{ $p->url() }}" target="_blank" rel="noopener" class="btn-light ml-1 !px-2 !py-0.5 !text-xs">เปิด ↗</a>
             </div>
             <div class="truncate font-mono text-xs text-slate-400" title="{{ $p->source }}">{{ $p->source }}</div>
             @if ($p->error) <div class="mt-1 text-xs text-red-600">{{ \Illuminate\Support\Str::limit($p->error, 160) }}</div> @endif

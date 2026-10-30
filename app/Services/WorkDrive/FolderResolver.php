@@ -19,14 +19,16 @@ class FolderResolver
     {
     }
 
-    /** @return array{id:string,name:string} */
+    /** @return array{id:string,name:string,is_folder:bool,permalink:?string} */
     public function resolve(string $line, ?string $companyFolderId): array
     {
         $line = trim($line);
 
         if (str_contains($line, 'workdrive.zoho') || preg_match('/^[a-z0-9]{25,}$/', $line)) {
-            $id = WorkDriveClient::extractId($line);
-            return ['id' => $id, 'name' => $id];
+            // อ่านข้อมูลจริง 1 ครั้ง เพื่อได้ชื่อ ชนิด และลิงก์ (และรู้ทันทีถ้าลิงก์ใช้ไม่ได้)
+            $item = $this->wd->info(WorkDriveClient::extractId($line));
+            $a = $item['attributes'] ?? [];
+            return ['id' => $item['id'], 'name' => $a['name'] ?? $item['id'], 'is_folder' => WorkDriveClient::isFolder($item), 'permalink' => $a['permalink'] ?? null];
         }
 
         $parts = array_values(array_filter(array_map('trim', preg_split('#[\\\\/]+#', $line)), 'strlen'));
@@ -46,6 +48,7 @@ class FolderResolver
         }
 
         $name = $company?->name ?? '';
+        $isFolder = true;
         foreach ($parts as $part) {
             $child = $this->findChild($current, $part);
             if (!$child) {
@@ -53,9 +56,10 @@ class FolderResolver
             }
             $current = $child['id'];
             $name = $child['name'];
+            $isFolder = $child['is_folder'];
         }
 
-        return ['id' => $current, 'name' => $name];
+        return ['id' => $current, 'name' => $name, 'is_folder' => $isFolder, 'permalink' => null];
     }
 
     private function findChild(string $folderId, string $name): ?array

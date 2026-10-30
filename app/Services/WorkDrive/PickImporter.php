@@ -37,7 +37,13 @@ class PickImporter
 
             $pick = SharePick::firstOrCreate(
                 ['share_group_id' => $group->id, 'category' => $category, 'source_id' => $found['id']],
-                ['source' => $source, 'source_name' => $found['name'], 'status' => 'pending']
+                [
+                    'source' => $source,
+                    'source_name' => $found['name'],
+                    'source_type' => $found['is_folder'] ? 'folder' : 'file',
+                    'permalink' => $found['permalink'],
+                    'status' => 'pending',
+                ]
             );
             $pick->wasRecentlyCreated ? $result['added']++ : $result['skipped']++;
         }
