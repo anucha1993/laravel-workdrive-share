@@ -235,9 +235,10 @@ class ShareGroupController extends Controller
     {
         $sourceIds = $group->picks()->distinct()->pluck('source_id');
         $emails = $group->recipients()->pluck('email');
-        $desired = $sourceIds->crossJoin($emails)->map(fn ($p) => "{$p[0]}|{$p[1]}");
-        $granted = $grants->where('status', 'granted')->map(fn ($g) => "{$g->resource_id}|{$g->email}");
+        // ใช้ array ธรรมดา: diff() ของ Eloquent Collection จะเรียก getKey() กับข้อความแล้ว error
+        $desired = $sourceIds->crossJoin($emails)->map(fn ($p) => "{$p[0]}|{$p[1]}")->all();
+        $granted = $grants->where('status', 'granted')->map(fn ($g) => "{$g->resource_id}|{$g->email}")->toBase()->all();
 
-        return $desired->diff($granted)->count() + $granted->diff($desired)->count();
+        return count(array_diff($desired, $granted)) + count(array_diff($granted, $desired));
     }
 }

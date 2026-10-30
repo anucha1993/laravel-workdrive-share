@@ -57,6 +57,17 @@ class PublicShareTest extends TestCase
         $this->get($this->group->fresh()->publicUrl())->assertOk();
     }
 
+    public function test_group_page_with_recipients_but_no_grants_yet(): void
+    {
+        $fresh = ShareGroup::create(['name' => 'ยังไม่เคยแชร์']);
+        SharePick::create(['share_group_id' => $fresh->id, 'category' => 'ก', 'source' => 'MJ1', 'source_id' => str_pad('x', 37, '0')]);
+        \App\Models\ShareRecipient::create(['share_group_id' => $fresh->id, 'email' => 'b@client.com']);
+
+        $this->actingAs(User::factory()->create())->get("/workdrive/{$fresh->id}")
+            ->assertOk()
+            ->assertSee('มีสิทธิ์ที่ยังไม่ได้อัปเดต 1 รายการ');
+    }
+
     public function test_group_page_shows_main_link(): void
     {
         $this->actingAs(User::factory()->create())->get("/workdrive/{$this->group->id}")
