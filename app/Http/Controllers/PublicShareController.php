@@ -139,7 +139,12 @@ class PublicShareController extends Controller
 
                 foreach ($files as [$file, $path]) {
                     try {
-                        $zip->addFileFromPsr7Stream($path, $wd->download($file['id'], $browser->downloadName($file)[1])->getBody());
+                        $zip->addFileFromPsr7Stream(
+                            fileName: $path,
+                            stream: $wd->download($file['id'], $browser->downloadName($file)[1])->getBody(),
+                            // ZIP เก็บเวลาแบบไม่มี timezone — ใช้เวลาไทยให้ตรงกับที่เห็นใน WorkDrive
+                            lastModificationDateTime: $file['modified'] ? \Illuminate\Support\Carbon::createFromTimestampMs($file['modified'])->timezone(config('app.timezone'))->shiftTimezone('UTC') : null,
+                        );
                     } catch (Throwable $e) {
                         report($e);
                         $zip->addFile($path . '.error.txt', 'ดาวน์โหลดไฟล์นี้ไม่สำเร็จ: ' . $e->getMessage());

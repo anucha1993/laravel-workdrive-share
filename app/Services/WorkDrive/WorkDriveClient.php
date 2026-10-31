@@ -104,26 +104,36 @@ class WorkDriveClient
     }
 
     // ------------------------------------------------------------ read
+    /** ขอเฉพาะ field ที่ใช้ — response เต็มมีราว 14 KB ต่อรายการ ทำให้ช้ามาก */
+    private const FIELDS = 'name,is_folder,type,extn,storage_info,modified_time_in_millisecond,parent_id,permalink';
+
     public function info(string $id): array
     {
-        return $this->call('GET', "/files/{$id}")['data'];
+        return $this->call('GET', "/files/{$id}", ['fields[files]' => self::FIELDS])['data'];
     }
 
-    /** รายการในโฟลเดอร์ (อ่านอย่างเดียว) — เก็บเฉพาะ id/ชื่อ/ชนิด เพราะ response มีขนาดราว 14 KB ต่อรายการ */
+    /**
+     * รายการในโฟลเดอร์ (อ่านอย่างเดียว)
+     * ใช้ cursor (page[next]) ได้ครั้งละ ~1,000 รายการ — วัดจริง 734 รายการ: offset ทีละ 50 = 70 วินาที, cursor = 2 วินาที
+     */
     public function children(string $folderId): array
     {
         $out = [];
-        $offset = 0;
-        do {
-            $page = $this->call('GET', "/files/{$folderId}/files", [
-                'page[limit]' => 50,
-                'page[offset]' => $offset,
-            ])['data'] ?? [];
-            foreach ($page as $item) {
+        $next = '0';
+        for ($guard = 0; $guard < 200 && $next !== null; $guard++) {
+            $res = $this->call('GET', "/files/{$folderId}/files", ['page[next]' => $next, 'fields[files]' => self::FIELDS]);
+            foreach ($res['data'] ?? [] as $item) {
                 $out[] = self::summary($item);
             }
-            $offset += 50;
-        } while (count($page) === 50);
+
+            // links.cursor.next เป็น URL เต็ม — ดึงค่า page[next] ออกมา
+            $next = null;
+            $cursor = $res['links']['cursor'] ?? [];
+            if (!empty($cursor['has_next']) && !empty($cursor['next'])) {
+                parse_str((string) parse_url($cursor['next'], PHP_URL_QUERY), $q);
+                $next = $q['page']['next'] ?? null;
+            }
+        }
 
         return $out;
     }

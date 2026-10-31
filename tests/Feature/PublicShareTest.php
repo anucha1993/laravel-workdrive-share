@@ -209,7 +209,14 @@ class PublicShareTest extends TestCase
         SharePick::query()->delete();
         $user = User::factory()->create();
 
+        // เปิดหน้าปกติ: ไม่ดึงรายการจาก WorkDrive เลย (เร็ว)
+        $before = count($this->wd->requests);
         $this->actingAs($user)->get("/workdrive/{$this->group->id}")
+            ->assertOk()->assertSee('เรียกดูโฟลเดอร์ลูกค้า')->assertDontSee('Associated Contacts');
+        $this->assertCount($before, $this->wd->requests, 'เปิดหน้าต้องไม่เรียก Zoho');
+
+        // กดเรียกดู: ค่อยดึงรายการ
+        $this->actingAs($user)->get("/workdrive/{$this->group->id}?browse={$this->group->company_folder_id}")
             ->assertOk()->assertSee('Associated Contacts')->assertSee('MH468133');
 
         $this->actingAs($user)->post("/workdrive/{$this->group->id}/picks/select", [

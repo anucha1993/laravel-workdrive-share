@@ -60,11 +60,16 @@
   <div class="card">
     <h2 class="card-title">เลือกจากโฟลเดอร์ลูกค้า</h2>
     @if (!$group->company_folder_id)
-      <p class="muted">ยังไม่ได้ผูกลูกค้า — ใช้ช่องวางชื่อด้านล่างเพื่อเลือกลูกค้า</p>
+      <p class="muted">ยังไม่ได้ผูกลูกค้า — ใช้ช่องวางชื่อด้านขวาเพื่อเลือกลูกค้า</p>
+    @elseif (!$browseId)
+      {{-- ไม่ดึงจาก WorkDrive จนกว่าจะกด (โฟลเดอร์ลูกค้าใหญ่โหลดช้า) --}}
+      <p class="muted mb-3">ดึงรายการในโฟลเดอร์ <b>{{ $group->company_name }}</b> จาก WorkDrive เพื่อติ๊กเลือก — ถ้าโฟลเดอร์ใหญ่อาจใช้เวลาสักครู่ ถ้ารู้ชื่ออยู่แล้ว ใช้ช่อง "วางชื่อโฟลเดอร์" จะเร็วกว่า</p>
+      <a href="{{ route('workdrive.show', [$group, 'browse' => $group->company_folder_id]) }}" class="btn" onclick="this.textContent = 'กำลังโหลด...'">📂 เรียกดูโฟลเดอร์ลูกค้า</a>
     @else
-      <p class="mb-2 text-sm">
-        <a href="{{ route('workdrive.show', $group) }}" class="text-emerald-800 hover:underline">📁 {{ $group->company_name }}</a>
+      <p class="mb-2 flex flex-wrap items-center gap-1 text-sm">
+        <a href="{{ route('workdrive.show', [$group, 'browse' => $group->company_folder_id]) }}" class="text-emerald-800 hover:underline">📁 {{ $group->company_name }}</a>
         @if ($browseName) <span class="text-slate-400">›</span> {{ $browseName }} @endif
+        <a href="{{ route('workdrive.show', $group) }}" class="ml-auto text-xs text-slate-500 hover:underline">ปิด ✕</a>
       </p>
       @if ($browseError)
         <p class="text-sm text-red-600">{{ $browseError }}</p>
@@ -72,10 +77,12 @@
         <form method="post" action="{{ route('workdrive.picks.select', $group) }}">
           @csrf
           <input type="hidden" name="browse" value="{{ $browseId }}">
+          <input type="search" class="input mb-2" placeholder="พิมพ์กรองชื่อ ({{ count($browseItems) }} รายการ)" autocomplete="off"
+                 oninput="const q = this.value.toLowerCase(); document.querySelectorAll('[data-browse-row]').forEach(r => r.hidden = !r.dataset.name.includes(q))">
           <div class="max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-100">
             @forelse ($browseItems as $i)
               @php $picked = $pickedIds->has($i['id']); @endphp
-              <div class="flex items-center gap-2 px-3 py-1.5 text-sm {{ $picked ? 'bg-emerald-50' : '' }}">
+              <div data-browse-row data-name="{{ mb_strtolower($i['name']) }}" class="flex items-center gap-2 px-3 py-1.5 text-sm {{ $picked ? 'bg-emerald-50' : '' }}">
                 <input type="checkbox" name="ids[]" value="{{ $i['id'] }}" @disabled($picked) @checked($picked)>
                 <span>{{ $i['is_folder'] ? '📁' : '📄' }}</span>
                 @if ($i['is_folder'])

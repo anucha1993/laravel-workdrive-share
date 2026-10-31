@@ -13,7 +13,7 @@ return [
     'company_root_id' => env('WORKDRIVE_COMPANY_ROOT_ID'),
 
     // หน่วงเวลาระหว่างคำขอ API (มิลลิวินาที) กันชนลิมิตของ Zoho
-    'request_delay_ms' => (int) env('WORKDRIVE_REQUEST_DELAY_MS', 700),
+    'request_delay_ms' => (int) env('WORKDRIVE_REQUEST_DELAY_MS', 200),
 
     // Login ด้วย Zoho (Server-based Application ใน api-console.zoho.com)
     'login' => [

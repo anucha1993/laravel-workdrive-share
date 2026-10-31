@@ -81,11 +81,18 @@ class FakeWorkDrive
 
             $path = substr($full, strlen('/workdrive/api/v1'));
 
-            // GET /files/{id}/files — รายการในโฟลเดอร์ (แบ่งหน้าละ 50)
+            // GET /files/{id}/files — รายการในโฟลเดอร์ แบ่งหน้าแบบ cursor (page[next]) หน้าละ 50 ในตัวจำลอง
             if ($method === 'GET' && preg_match('#^/files/(\w+)/files$#', $path, $m)) {
                 $kids = array_values(array_filter($this->items, fn ($i) => $i['parent'] === $m[1] && $i['status'] === 1));
-                $page = array_slice($kids, (int) ($q['page']['offset'] ?? 0), (int) ($q['page']['limit'] ?? 50));
-                return Http::response(['data' => array_map(fn ($i) => ['id' => $i['id'], 'type' => 'files', 'attributes' => $this->attributes($i)], $page)]);
+                $offset = (int) ($q['page']['next'] ?? 0);
+                $page = array_slice($kids, $offset, 50);
+                $hasNext = $offset + 50 < count($kids);
+                return Http::response([
+                    'data' => array_map(fn ($i) => ['id' => $i['id'], 'type' => 'files', 'attributes' => $this->attributes($i)], $page),
+                    'links' => ['cursor' => $hasNext
+                        ? ['has_next' => true, 'next' => "https://www.zohoapis.com/workdrive/api/v1/files/{$m[1]}/files?page[next]=" . ($offset + 50)]
+                        : ['has_next' => false]],
+                ]);
             }
 
             // GET /files/{id}

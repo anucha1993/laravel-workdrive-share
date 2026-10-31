@@ -79,8 +79,8 @@ class ShareGroupController extends Controller
         $publicUrl = $group->publicUrl();
         $logs = $group->accessLogs()->limit(30)->get();
 
-        // ติ๊กเลือกจากโฟลเดอร์ลูกค้า (ดึงสดจาก WorkDrive) — เข้าโฟลเดอร์ย่อยได้ด้วย ?browse=
-        $browseId = $request->query('browse', $group->company_folder_id);
+        // ติ๊กเลือกจากโฟลเดอร์ลูกค้า — ดึงจาก WorkDrive เฉพาะเมื่อกดเรียกดู (?browse=) เพราะโฟลเดอร์ใหญ่โหลดช้า
+        $browseId = $request->query('browse');
         $browseItems = [];
         $browseError = null;
         if ($browseId) {
